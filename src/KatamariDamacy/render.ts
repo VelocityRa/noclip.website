@@ -380,7 +380,7 @@ class BINTextureData {
 
                 device.uploadTextureData(gfxTexture, 0, [pixels]);
                 this.gfxTexture[i] = gfxTexture;
-    
+
                 this.viewerTexture[i] = textureToCanvas(texture, `${texture.name}/${i}`, pixels);
             }
         }

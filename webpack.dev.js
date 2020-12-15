@@ -8,6 +8,7 @@ module.exports = merge(common, {
   devtool: 'eval-cheap-module-source-map',
   devServer: {
     contentBase: './dist',
+    disableHostCheck: true,
   },
   cache: {
     type: 'filesystem',

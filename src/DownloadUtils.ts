@@ -20,9 +20,23 @@ export function downloadBufferSlice(filename: string, buffer: ArrayBufferSlice, 
     const blob = new Blob([buffer.createTypedArray(Uint8Array)], { type });
     downloadBlob(filename, blob);
 }
+export function downloadText(filename: string, str: string, type: string = 'application/text'): void {
+    const blob = new Blob([str], { type });
+    downloadBlob(filename, blob);
+}
 
 export function downloadBuffer(filename: string, buffer: ArrayBufferLike, type: string = 'application/octet-stream'): void {
     buffer = buffer as ArrayBuffer;
     const blob = new Blob([buffer], { type });
     downloadBlob(filename, blob);
+}
+
+export function downloadCanvasAsPng(canvas: HTMLCanvasElement, filename: string = 'canvas.png'): void {
+    let downloadLink = document.createElement('a');
+    downloadLink.setAttribute('download', filename);
+    canvas.toBlob(function(blob) {
+    let url = URL.createObjectURL(blob);
+    downloadLink.setAttribute('href', url);
+    downloadLink.click();
+    });
 }

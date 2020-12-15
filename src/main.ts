@@ -67,6 +67,7 @@ import * as Scenes_BeetleAdventureRacing from './BeetleAdventureRacing/Scenes';
 import * as Scenes_TheWitness from './TheWitness/Scenes_TheWitness';
 import * as Scenes_FFX from './FinalFantasyX/scenes';
 import * as Scenes_WiiBanner from './Common/NW4R/lyt/Scenes_WiiBanner';
+import * as Scenes_Sly1 from './SlyCooper/Scenes_Sly1';
 
 import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops';
 
@@ -140,6 +141,8 @@ const sceneGroups = [
     Scenes_KatamariDamacy.sceneGroup,
     Scenes_KingdomHearts.sceneGroup,
     Scenes_KingdomHeartsIIFinalMix.sceneGroup,
+    "PlayStation 3",
+    Scenes_Sly1.sceneGroup,
     "Xbox",
     Scenes_SpongeBobBFBB.sceneGroup,
     "PC",

@@ -329,7 +329,7 @@ class KatamariDamacyRenderer implements Viewer.SceneGfx {
         palettePanel.customHeaderBackgroundColor = UI.COOL_BLUE_COLOR;
 
         const paletteSelect = new UI.SingleSelect();
-        paletteSelect.setStrings(['Uncollected', 'Collected']);
+        paletteSelect.setStrings(['Collected', 'Uncollected']);
         paletteSelect.onselectionchange = (index: number) => {
             this.currentPalette = index;
         };
@@ -613,7 +613,7 @@ const stageModels: string[] = [
     '135ebf', '135fe0', '13612f', '136282',
     '1363c5', '1364a3', '136599', '1366d7', '136797',
     '1367a0', '1367af', '1367be',
-    '1367cd', '13681e', '13685f', '13685f', // '1368f2', 
+    '1367cd', '13681e', '13685f', '13685f', // '1368f2',
     '136985', '13698a', '13699b', '1369ae',
     '136a83',
 ];
