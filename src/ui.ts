@@ -14,6 +14,7 @@ import { DebugFloaterHolder } from './DebugFloaters';
 import { DraggingMode } from './InputManager';
 import { CLAPBOARD_ICON, StudioPanel } from './Studio';
 import { SceneDesc, SceneGroup } from './SceneBase';
+import { downloadCanvasAsPng } from './DownloadUtils';
 
 // @ts-ignore
 import logoURL from './assets/logo.png';
@@ -779,7 +780,7 @@ export class Panel implements Widget {
 
         this.header = document.createElement('h1');
         this.header.style.lineHeight = '28px';
-        this.header.style.width = '440px';
+        this.header.style.width = '490px';
         this.header.style.margin = '0';
         this.header.style.fontSize = '100%';
         this.header.style.cursor = 'pointer';
@@ -800,7 +801,7 @@ export class Panel implements Widget {
         this.headerContainer.appendChild(this.header);
 
         this.contents = document.createElement('div');
-        this.contents.style.width = '440px';
+        this.contents.style.width = '490px';
         this.mainPanel.appendChild(this.contents);
 
         this.elem = this.toplevel;
@@ -816,7 +817,7 @@ export class Panel implements Widget {
 
     private syncSize() {
         const widthExpanded = this.expanded || this.mainPanel.matches(':hover');
-        this.mainPanel.style.width = widthExpanded ? '440px' : '28px';
+        this.mainPanel.style.width = widthExpanded ? '490px' : '28px';
 
         const heightExpanded = this.expanded;
         if (heightExpanded) {
@@ -1273,7 +1274,8 @@ export class TextureViewer extends Panel {
         this.setTitle(TEXTURES_ICON, 'Textures');
 
         this.scrollList = new SingleSelect();
-        this.scrollList.elem.style.height = `200px`;
+        this.scrollList.setHeight('700px');
+        this.scrollList.elem.style.height = `700px`;
         this.scrollList.elem.style.overflow = 'auto';
         this.scrollList.onselectionchange = (i: number) => {
             this.selectTexture(i);
@@ -1282,7 +1284,7 @@ export class TextureViewer extends Panel {
 
         this.surfaceView = document.createElement('div');
         this.surfaceView.style.width = '100%';
-        this.surfaceView.style.height = '200px';
+        this.surfaceView.style.height = '100px';
 
         // TODO(jstpierre): Make a less-sucky UI for the texture view.
         this.surfaceView.onmouseover = () => {
@@ -1380,8 +1382,17 @@ export class TextureViewer extends Panel {
             div.appendChild(valueSpan);
         });
 
-        if (texture.surfaces.length > 0)
+        if (texture.surfaces.length > 0) {
+            const btn = document.createElement('button');
+            btn.textContent = 'Download';
+            btn.type = 'button';
+            btn.onclick = e => {
+                downloadCanvasAsPng(texture.surfaces[0], texture.name);
+            }
+            div.appendChild(btn);
+
             this.showInSurfaceView(texture.surfaces[0]);
+        }
 
         this.showInFullSurfaceView(texture.surfaces);
     }

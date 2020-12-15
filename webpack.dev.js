@@ -19,6 +19,8 @@ module.exports = merge(common, {
       watch: false,
     },
     compress: true,
+    contentBase: './dist',
+    disableHostCheck: true,
   },
   module: {
     rules: [

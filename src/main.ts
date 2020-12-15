@@ -83,6 +83,7 @@ import * as Scenes_JetSetRadio from './JetSetRadio/Scenes';
 import * as Scenes_Subnautica from './Subnautica/scenes';
 import * as Scenes_Glover from './Glover/scenes';
 import * as Scenes_HalfLife from './GoldSrc/Scenes_HalfLife';
+import * as Scenes_Sly1 from './SlyCooper/Scenes_Sly1';
 
 import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops';
 
@@ -158,6 +159,8 @@ const sceneGroups = [
     Scenes_KatamariDamacy.sceneGroup,
     Scenes_KingdomHearts.sceneGroup,
     Scenes_KingdomHeartsIIFinalMix.sceneGroup,
+    "PlayStation 3",
+    Scenes_Sly1.sceneGroup,
     "Xbox",
     Scenes_SpongeBobBFBB.sceneGroup,
     "PC",
