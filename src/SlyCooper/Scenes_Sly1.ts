@@ -45,15 +45,31 @@ function sprintf(fmt: string, ...args: any[]) {
 
 const pathBase = `Sly1`;
 
+function Uint8Array_indexOfMulti(arr: Uint8Array, searchElements: Uint8Array, fromIndex: number = 0): number {
+    var index = arr.indexOf(searchElements[0], fromIndex);
+
+    if(searchElements.length === 1 || index === -1) {
+        // Not found or no other elements to check
+        return index;
+    }
+
+    for(var i = index, j = 0; j < searchElements.length && i < arr.length; i++, j++) {
+        if(arr[i] !== searchElements[j]) {
+            return Uint8Array_indexOfMulti(arr, searchElements, index + 1);
+        }
+    }
+
+    return (i === index + searchElements.length) ? index : -1;
+};
+
 class Sly1LevelSceneDesc implements SceneDesc {
     private meshes: Data.Mesh[] = [];
-    private textures: Data.Texture[] = [];
+    private textures: (Data.Texture | null)[] = [];
 
-    constructor(public id: string, public name: string) {
+    constructor(public id: string, public name: string, private tex_pal_offs: number) {
     }
 
     public async createScene(device: GfxDevice, context: SceneContext): Promise<SceneGfx> {
-
         // TODO? Use compressed original files (orig. or zip/etc), or decompressed trimmed files
 
         const bin = await context.dataFetcher.fetchData(`${pathBase}/${this.id}_W.dec`)
@@ -76,20 +92,24 @@ class Sly1LevelSceneDesc implements SceneDesc {
             //         bin.slice(0x93c640 + i), bin.slice(0xA01100 + 0x100000 * 2), 1024, 1024, (i / 0x400).toString()));
             // }
 
-            // TODO: don't hardcode these
-            const TEX_INFO_BASE = 0x4AFC;
-            const TEX_PALETTE_BASE = 0x93c640;
-            // const TEX_IMAGE_BASE = 0xA01100;
+            const binU8arr = bin.createTypedArray(Uint8Array);
+            let enc = new TextEncoder();
+            // TODO: verify it works for every level
+            const tex_meta_offs = Uint8Array_indexOfMulti(binU8arr, enc.encode("FK$Dcrmtaunt07")) + 0x20;
+            console.log(`tex_meta_offs ${hexzero0x(tex_meta_offs)}`);
 
-            let textureInfoStream = new Data.DataStream(bin.slice(TEX_INFO_BASE));
+            let textureInfoStream = new Data.DataStream(bin.slice(tex_meta_offs));
 
             const clutMetaEntries = Data.parseCLUTMetaEntries(textureInfoStream);
             const imageMetaEntries = Data.parseImageMetaEntries(textureInfoStream);
             const textureEntries = Data.parseTextureEntries(textureInfoStream);
 
-            console.log(clutMetaEntries);
-            console.log(imageMetaEntries);
-            console.log(textureEntries);
+            console.log(`clut#: ${clutMetaEntries.length}`);
+            console.log(`img #: ${imageMetaEntries.length}`);
+            console.log(`tex #: ${textureEntries.length}`);
+
+            for (let i = 0; i < textureEntries.length; ++i)
+                this.textures.push(null);
 
             let texEntryIdx = 0;
             for (let texEntry of textureEntries) {
@@ -110,12 +130,12 @@ class Sly1LevelSceneDesc implements SceneDesc {
                         const height = imageMeta.height;
                         // console.log(`clutMeta: ${clutMeta.offset} imageMeta: ${imageMeta.offset}`);
                         // console.log(`w: ${width} h: ${height} C: ${hexzero(clutMeta.offset, 8)} I: ${hexzero(imageMeta.offset, 8)}`);
-                        const paletteBuf = bin.slice(TEX_PALETTE_BASE + clutMeta.offset);
-                        const imageBuf = bin.slice(TEX_PALETTE_BASE + imageMeta.offset)
+                        const paletteBuf = bin.slice(this.tex_pal_offs + clutMeta.offset);
+                        const imageBuf = bin.slice(this.tex_pal_offs + imageMeta.offset)
                         const name = sprintf('Id %03d-%03d-%03d Res %04dx%04d Clt %05X Img %06X',
                             texEntryIdx, clutIndex, imageIndex, width, height, clutMeta.offset, imageMeta.offset);
                         const texture = new Data.Texture(paletteBuf, imageBuf, width, height, name);
-                        this.textures.push(texture);
+                        this.textures[texEntryIdx] = texture;
                     } else {
                         // todo
                         console.log(`skip, colorcount: ${clutMeta.colorCount}`);
@@ -127,31 +147,40 @@ class Sly1LevelSceneDesc implements SceneDesc {
                 const isManyImgManyPal = !is1Img1Pal && (texEntry.imageIndices.length > 1) && (texEntry.clutIndices.length > 1);
 
                 if (is1Img1Pal) {
-                    for (let i = 0; i < texEntry.clutIndices.length; i++) {
-                        makeTexture(texEntry.clutIndices[i], texEntry.imageIndices[i]);
-                    }
+                    // for (let i = 0; i < texEntry.clutIndices.length; i++) {
+                    //     makeTexture(texEntry.clutIndices[i], texEntry.imageIndices[i]);
+                    // }
+                    console.log(`1img1pal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
+                    // Use first one
+                    makeTexture(texEntry.clutIndices[0], texEntry.imageIndices[0]);
                 } else if (is1ImgManyPal) {
-                    for (let palIndex of texEntry.clutIndices) {
-                        makeTexture(palIndex, texEntry.imageIndices[0]);
-                    }
+                    // for (let palIndex of texEntry.clutIndices) {
+                    //     makeTexture(palIndex, texEntry.imageIndices[0]);
+                    // }
+                    console.log(`1imgNpal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
+                    // Use diffuse
+                    makeTexture(texEntry.clutIndices[1], texEntry.imageIndices[0]);
                 } else if (isManyImgManyPal) {
                     if (!Number.isInteger(texEntry.clutIndices.length / texEntry.imageIndices.length)) {
                         console.log(`WARN: nonint m2m ${texEntryIdx} ${texEntry.clutIndices.length} ${texEntry.imageIndices.length}`);
                     }
-                    const divPalImg = Math.floor(texEntry.clutIndices.length / texEntry.imageIndices.length);
-                    for (let i = 0; i < texEntry.clutIndices.length; ++i) {
-                        let imgIndex = Math.floor(i / divPalImg);
-                        makeTexture(texEntry.clutIndices[i], texEntry.imageIndices[imgIndex]);
-                    }
+                    // const divPalImg = Math.floor(texEntry.clutIndices.length / texEntry.imageIndices.length);
+                    // for (let i = 0; i < texEntry.clutIndices.length; ++i) {
+                    //     let imgIndex = Math.floor(i / divPalImg);
+                    //     makeTexture(texEntry.clutIndices[i], texEntry.imageIndices[imgIndex]);
+                    // }
+                    console.log(`NimgMpal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
+                    // Use first ones
+                    makeTexture(texEntry.clutIndices[0], texEntry.imageIndices[0]);
                 } else {
                     console.log(`WARN: other ${texEntryIdx} ${texEntry.clutIndices.length} ${texEntry.imageIndices.length}`);
                 }
                 texEntryIdx++;
             }
 
-            if (Settings.TEXTURES_SORT_BY_SIZE) {
-                this.textures.sort((texA: Data.Texture, texB: Data.Texture) => (texA.width * texA.height > texB.width * texB.height) ? -1 : 1);
-            }
+            // if (Settings.TEXTURES_SORT_BY_SIZE) {
+                // this.textures.sort((texA: Data.Texture, texB: Data.Texture) => (texA.width * texA.height > texB.width * texB.height) ? -1 : 1);
+            // }
 
         }
 
@@ -159,12 +188,16 @@ class Sly1LevelSceneDesc implements SceneDesc {
             let index = 0;
             for (let offset = 0; offset < bin.byteLength - 4; ++offset) {
                 if (binView.getUint32(offset, true) === Data.Mesh.szmsMagic) {
-                    this.meshes.push(new Data.Mesh(bin, offset, index));
+                    try {
+                        this.meshes.push(new Data.Mesh(bin, offset, index));
                     ++index;
+                    } catch(e) {
+                        console.warn(`Error parsing mesh: ${e}`);
+                    }
                 }
             }
 
-            console.log(`Total chunk count ${Data.totalChunkCount}`);
+            console.log(`Mesh #: ${this.meshes.length}`);
 
             // export to .obj
 
@@ -233,7 +266,8 @@ class Sly1LevelSceneDesc implements SceneDesc {
         const renderer = new SlyRenderer(device, this.meshes, this.textures);
 
         for (let tex of this.textures) {
-            renderer.textureHolder.viewerTextures.push(await tex.toCanvas());
+            if (tex)
+                renderer.textureHolder.viewerTextures.push(await tex.toCanvas());
         }
         return renderer;
     }
@@ -243,64 +277,64 @@ class Sly1LevelSceneDesc implements SceneDesc {
 // TODO: Should titles be world titles instead of ep?
 const sceneDescs = [
     "Police Headquarters (Paris, France)",
-    new Sly1LevelSceneDesc("jb_intro", "Paris, France"),
+    new Sly1LevelSceneDesc("jb_intro", "Paris, France", 0x00B12960),
 
     "Tide of Terror (Isle of Wrath, Wales)",
-    new Sly1LevelSceneDesc("uw_exterior_approach", "A Stealthy Approach"),
-    new Sly1LevelSceneDesc("uw_exterior_boat", "Prowling the Grounds"),
-    new Sly1LevelSceneDesc("uw_bonus_drivewheels", "Into the Machine"),
-    new Sly1LevelSceneDesc("uw_bonus_security", "High Class Heist"),
-    new Sly1LevelSceneDesc("uw_c2_final", "The Fire Down Below"),
-    new Sly1LevelSceneDesc("uw_bonus_library", "A Cunning Disguise"),
-    new Sly1LevelSceneDesc("uw_t3_final", "Gunboat Graveyard"),
-    new Sly1LevelSceneDesc("uw_rip_off", "Treasure in the Depths"),
-    new Sly1LevelSceneDesc("uw_boss_blimp", "The Eye of the Storm"),
+    new Sly1LevelSceneDesc("uw_exterior_approach", "A Stealthy Approach", 0x0093C640),
+    new Sly1LevelSceneDesc("uw_exterior_boat", "Prowling the Grounds", 0x007CA244),
+    new Sly1LevelSceneDesc("uw_bonus_drivewheels", "Into the Machine", 0x00624B70),
+    // new Sly1LevelSceneDesc("uw_bonus_security", "High Class Heist", ),
+    // new Sly1LevelSceneDesc("uw_c2_final", "The Fire Down Below", ),
+    // new Sly1LevelSceneDesc("uw_bonus_library", "A Cunning Disguise", ),
+    // new Sly1LevelSceneDesc("uw_t3_final", "Gunboat Graveyard", ),
+    // new Sly1LevelSceneDesc("uw_rip_off", "Treasure in the Depths", ),
+    // new Sly1LevelSceneDesc("uw_boss_blimp", "The Eye of the Storm", ),
 
-    "Sunset Snake Eyes (Mesa City, Utah)",
-    new Sly1LevelSceneDesc("ms_approach", "A Rocky Start"),
-    new Sly1LevelSceneDesc("ms_exterior", "Muggshot's Turf"),
-    new Sly1LevelSceneDesc("ms_casino", "Boneyard Casino"),
-    new Sly1LevelSceneDesc("ms_sniper", "Murray's Big Gamble"),
-    new Sly1LevelSceneDesc("ms_suv", "At the Dog Track"),
-    new Sly1LevelSceneDesc("ms_inspector", "Two to Tango"),
-    new Sly1LevelSceneDesc("ms_vertigo", "Back Alley Heist"),
-    new Sly1LevelSceneDesc("ms_rooftop", "Straight to the Top"),
-    new Sly1LevelSceneDesc("ms_boss_battle", "Last Call"),
+    // "Sunset Snake Eyes (Mesa City, Utah)",
+    // new Sly1LevelSceneDesc("ms_approach", "A Rocky Start", ),
+    // new Sly1LevelSceneDesc("ms_exterior", "Muggshot's Turf", ),
+    // new Sly1LevelSceneDesc("ms_casino", "Boneyard Casino", ),
+    // new Sly1LevelSceneDesc("ms_sniper", "Murray's Big Gamble", ),
+    // new Sly1LevelSceneDesc("ms_suv", "At the Dog Track", ),
+    // new Sly1LevelSceneDesc("ms_inspector", "Two to Tango", ),
+    // new Sly1LevelSceneDesc("ms_vertigo", "Back Alley Heist", ),
+    // new Sly1LevelSceneDesc("ms_rooftop", "Straight to the Top", ),
+    // new Sly1LevelSceneDesc("ms_boss_battle", "Last Call", ),
 
-    "Vicious Voodoo (Haiti)",
-    new Sly1LevelSceneDesc("v_approach", "The Dread Swamp Path"),
-    new Sly1LevelSceneDesc("v_hub", "The Swamp's Dark Center"),
-    new Sly1LevelSceneDesc("v_swamp_monster", "The Lair of the Beast"),
-    new Sly1LevelSceneDesc("v_gomerville", "A Grave Undertaking"),
-    new Sly1LevelSceneDesc("v_puffer", "Piranha Lake"),
-    new Sly1LevelSceneDesc("v_skinterior", "Descent Into Danger"),
-    new Sly1LevelSceneDesc("v_murray", "A Ghastly Voyage"),
-    new Sly1LevelSceneDesc("v_chicken", "Down Home Cooking"),
-    new Sly1LevelSceneDesc("v_boss", "A Deadly Dance"),
+    // "Vicious Voodoo (Haiti)",
+    // new Sly1LevelSceneDesc("v_approach", "The Dread Swamp Path", ),
+    // new Sly1LevelSceneDesc("v_hub", "The Swamp's Dark Center", ),
+    // new Sly1LevelSceneDesc("v_swamp_monster", "The Lair of the Beast", ),
+    // new Sly1LevelSceneDesc("v_gomerville", "A Grave Undertaking", ),
+    // new Sly1LevelSceneDesc("v_puffer", "Piranha Lake", ),
+    // new Sly1LevelSceneDesc("v_skinterior", "Descent Into Danger", ),
+    // new Sly1LevelSceneDesc("v_murray", "A Ghastly Voyage", ),
+    // new Sly1LevelSceneDesc("v_chicken", "Down Home Cooking", ),
+    // new Sly1LevelSceneDesc("v_boss", "A Deadly Dance", ),
 
-    "Fire in the Sky (Kunlun Mountains, China)",
-    new Sly1LevelSceneDesc("s_approach", "A Perilous Ascent"),
-    new Sly1LevelSceneDesc("s_hub", "Inside the Stronghold"),
-    new Sly1LevelSceneDesc("s_security", "Flaming Temple of Flame"),
-    new Sly1LevelSceneDesc("s_barrel", "The Unseen Foe"),
-    new Sly1LevelSceneDesc("s_sniper", "The King of the Hill"),
-    new Sly1LevelSceneDesc("s_tank", "Rapid Fire Assault"),
-    new Sly1LevelSceneDesc("s_suv", "A Desperate Race"),
-    new Sly1LevelSceneDesc("s_inspector", "Duel by the Dragon"),
-    new Sly1LevelSceneDesc("s_boss", "Flame Fu!"),
+    // "Fire in the Sky (Kunlun Mountains, China)",
+    // new Sly1LevelSceneDesc("s_approach", "A Perilous Ascent", ),
+    // new Sly1LevelSceneDesc("s_hub", "Inside the Stronghold", ),
+    // new Sly1LevelSceneDesc("s_security", "Flaming Temple of Flame", ),
+    // new Sly1LevelSceneDesc("s_barrel", "The Unseen Foe", ),
+    // new Sly1LevelSceneDesc("s_sniper", "The King of the Hill", ),
+    // new Sly1LevelSceneDesc("s_tank", "Rapid Fire Assault", ),
+    // new Sly1LevelSceneDesc("s_suv", "A Desperate Race", ),
+    // new Sly1LevelSceneDesc("s_inspector", "Duel by the Dragon", ),
+    // new Sly1LevelSceneDesc("s_boss", "Flame Fu!", ),
 
-    "The Cold Heart of Hate (Krakarov Volcano, Russia)",
-    new Sly1LevelSceneDesc("cw_turret", "A Hazardous Path"),
-    new Sly1LevelSceneDesc("cw_suv", "Burning Rubber"),
-    new Sly1LevelSceneDesc("cw_security", "A Daring Rescue"),
-    new Sly1LevelSceneDesc("cw_bentley", "Bentley Comes Through"),
-    new Sly1LevelSceneDesc("cw_reverse_sniper", "A Temporary Truce"),
-    new Sly1LevelSceneDesc("cw_outclimb", "Sinking Peril"),
-    new Sly1LevelSceneDesc("cw_finish", "A Strange Reunion"),
+    // "The Cold Heart of Hate (Krakarov Volcano, Russia)",
+    // new Sly1LevelSceneDesc("cw_turret", "A Hazardous Path", ),
+    // new Sly1LevelSceneDesc("cw_suv", "Burning Rubber", ),
+    // new Sly1LevelSceneDesc("cw_security", "A Daring Rescue", ),
+    // new Sly1LevelSceneDesc("cw_bentley", "Bentley Comes Through", ),
+    // new Sly1LevelSceneDesc("cw_reverse_sniper", "A Temporary Truce", ),
+    // new Sly1LevelSceneDesc("cw_outclimb", "Sinking Peril", ),
+    // new Sly1LevelSceneDesc("cw_finish", "A Strange Reunion", ),
 
-    "Miscellaneous",
-    new Sly1LevelSceneDesc("splash", "Splash"),
-    new Sly1LevelSceneDesc("hideout", "The Hideout")
+    // "Miscellaneous",
+    // new Sly1LevelSceneDesc("splash", "Splash", ),
+    // new Sly1LevelSceneDesc("hideout", "The Hideout", )
 ];
 
 const id = 'Sly1';

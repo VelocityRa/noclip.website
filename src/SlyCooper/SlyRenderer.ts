@@ -1,6 +1,6 @@
 import * as Viewer from '../viewer';
 import { FakeTextureHolder } from '../TextureHolder';
-import { GfxDevice, GfxRenderPass, GfxBindingLayoutDescriptor, GfxHostAccessPass, GfxMegaStateDescriptor, GfxCullMode, GfxFrontFaceMode, GfxBlendMode, GfxBlendFactor, GfxSampler, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxProgramDescriptorSimple } from "../gfx/platform/GfxPlatform";
+import { GfxDevice, GfxRenderPass, GfxBindingLayoutDescriptor, GfxHostAccessPass, GfxMegaStateDescriptor, GfxCullMode, GfxFrontFaceMode, GfxBlendMode, GfxBlendFactor, GfxSampler, GfxTexture, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxProgramDescriptorSimple, makeTextureDescriptor2D } from "../gfx/platform/GfxPlatform";
 import { preprocessProgramObj_GLSL } from "../gfx/shaderc/GfxShaderCompiler";
 import { GfxRenderHelper } from "../gfx/render/GfxRenderGraph";
 import { BasicRenderTarget, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderTargetHelpers";
@@ -8,7 +8,7 @@ import { GfxRenderInstManager, GfxRendererLayer, makeSortKeyOpaque } from "../gf
 import { fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v } from "../gfx/helpers/UniformBufferHelpers";
 import { mat4, vec3, vec2, vec4 } from "gl-matrix";
 import { computeViewMatrix, CameraController } from "../Camera";
-import { nArray, assertExists } from "../util";
+import { nArray, assertExists, hexzero0x } from "../util";
 import { TextureMapping } from "../TextureHolder";
 import { MathConstants, scaleMatrix } from "../MathHelpers";
 import { AABB } from "../Geometry";
@@ -34,7 +34,7 @@ layout(row_major, std140) uniform ub_ShapeParams {
 #define u_BaseDiffuse 1.0
 #define u_BaseAmbient 0.2
 
-// uniform sampler2D u_Texture[1];
+uniform sampler2D u_Texture[1];
 `;
 
     public vert: string = `
@@ -61,6 +61,7 @@ in vec3 v_Normal;
 
 void main() {
     vec2 t_DiffuseTexCoord = mod(v_TexCoord, vec2(1.0, 1.0));
+    vec4 t_DiffuseMapColor = texture(SAMPLER_2D(u_Texture[0]), t_DiffuseTexCoord.xy);
 
     // float t_LightFalloff = clamp(dot(u_LightDirection.xyz, v_Normal.xyz), 0.0, 1.0);
     // float t_Illum = clamp(t_LightFalloff + u_BaseAmbient, 0.0, 1.0);
@@ -69,18 +70,20 @@ void main() {
     // gl_FragColor.a = t_DiffuseMapColor.a;
 
     // gl_FragColor = vec4(t_DiffuseTexCoord, 0.0, 1.0);
-    gl_FragColor = vec4(v_Normal, 1.0);
+
+    // gl_FragColor = vec4(v_Normal, 1.0);
+
+    gl_FragColor.rgb = t_DiffuseMapColor.rgb;
+    gl_FragColor.a = 1.0;
 }
 `;
 }
 
 const bindingLayouts: GfxBindingLayoutDescriptor[] = [
-    { numUniformBuffers: 2, numSamplers: 0, },
+    { numUniformBuffers: 2, numSamplers: 1, },
 ];
 
 const modelViewScratch = mat4.create();
-
-// TODO: move?
 
 export class SlyRenderer implements Viewer.SceneGfx {
     public textureHolder = new FakeTextureHolder([]);
@@ -91,19 +94,26 @@ export class SlyRenderer implements Viewer.SceneGfx {
     private modelMatrix: mat4 = mat4.create();
     private meshRenderers: SlyMeshRenderer[] = [];
 
-    constructor(device: GfxDevice, meshes: Data.Mesh[], textures: Data.Texture[]) {
+    constructor(device: GfxDevice, meshes: Data.Mesh[], textures: (Data.Texture | null)[]) {
         this.renderHelper = new GfxRenderHelper(device);
         this.program = preprocessProgramObj_GLSL(device, new SlyProgram());
         console.log(this.program);
-
-        mat4.fromScaling(this.modelMatrix, [1 / 100, 1 / 100, 1 / 100]);
 
         const gfxCache = this.renderHelper.getCache();
 
         for (let mesh of meshes) {
             for (let meshChunk of mesh.chunks) {
-                const chunkGeometryData = new GeometryData(device, gfxCache, meshChunk);
-                const meshRenderer = new SlyMeshRenderer(chunkGeometryData);
+                const geometryData = new GeometryData(device, gfxCache, meshChunk);
+                let textureData: (TextureData | null) = null;
+                if (meshChunk.szme) {
+                    const texture = textures[meshChunk.szme.texIndex];
+                    if (texture) {
+                        console.log(`mesh at ${hexzero0x(mesh.offset)} gets texID ${hexzero0x(meshChunk.szme.texIndex)}`);
+                        textureData = new TextureData(device, gfxCache, texture)
+                    }
+                }
+                const meshRenderer = new SlyMeshRenderer(textureData, geometryData);
+
                 this.meshRenderers.push(meshRenderer);
             }
         }
@@ -175,7 +185,6 @@ export class GeometryData {
     // constructor(device: GfxDevice, cache: GfxRenderCache, geometry: Sly_ShaderInstancedIndexedPrimitives<Sly_VertexPositionNormalTextureInstance>) {
     // constructor(device: GfxDevice, cache: GfxRenderCache, geometry: IndexedPrimitives<VertexAttributes>) {
     constructor(device: GfxDevice, cache: GfxRenderCache, meshChunk: Data.MeshChunk) {
-
         const indices = Uint16Array.from(meshChunk.trianglesIndices);
         this.indexCount = indices.length;
         this.positionBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, meshChunk.positions.buffer);
@@ -215,17 +224,54 @@ export class GeometryData {
     }
 }
 
-const textureMappingScratch = nArray(2, () => new TextureMapping());
+class TextureData {
+    public texture: GfxTexture;
+    public sampler: GfxSampler;
+
+    private makeGfxTexture(device: GfxDevice, texture: Data.Texture): GfxTexture {
+        const hostAccessPass = device.createHostAccessPass();
+        // console.log(`makeGfxTexture: size ${texture.width}x${texture.height}`);
+        const gfxTexture = device.createTexture(makeTextureDescriptor2D(GfxFormat.U8_RGBA_NORM, texture.width, texture.height, 1));
+        // console.log(gfxTexture);
+        hostAccessPass.uploadTextureData(gfxTexture, 0, [texture.texels_rgba]);
+        device.submitPass(hostAccessPass);
+        return gfxTexture;
+    }
+
+    constructor(device: GfxDevice, gfxCache: GfxRenderCache, texture: Data.Texture) {
+        this.texture = this.makeGfxTexture(device, texture);
+
+        this.sampler = gfxCache.createSampler(device, {
+            // wrapS: GfxWrapMode.CLAMP,
+            // wrapT: GfxWrapMode.CLAMP,
+            wrapS: GfxWrapMode.REPEAT,
+            wrapT: GfxWrapMode.REPEAT,
+            // minFilter: GfxTexFilterMode.POINT,
+            // magFilter: GfxTexFilterMode.POINT,
+            minFilter: GfxTexFilterMode.BILINEAR,
+            magFilter: GfxTexFilterMode.BILINEAR,
+            mipFilter: GfxMipFilterMode.NO_MIP,
+            minLOD: 0, maxLOD: 0,
+        });
+    }
+}
+
+const textureMappingScratch = nArray(1, () => new TextureMapping());
+
 export class SlyMeshRenderer {
     public modelMatrix = mat4.create();
     public textureMatrix = mat4.create();
-    private textureMapping = new TextureMapping();
+    private textureMapping: (TextureMapping | null);
     private megaStateFlags: Partial<GfxMegaStateDescriptor> = {};
 
-    // constructor(textureData: (ArtObjectData | TrilesetData), private geometryData: GeometryData) {
-    constructor(private geometryData: GeometryData) {
-        // this.textureMapping.gfxTexture = textureData.texture;
-        // this.textureMapping.gfxSampler = textureData.sampler;
+    constructor(textureData: (TextureData | null), private geometryData: GeometryData) {
+        if (textureData) {
+            this.textureMapping = new TextureMapping();
+            this.textureMapping.gfxTexture = textureData.texture;
+            this.textureMapping.gfxSampler = textureData.sampler;
+        } else {
+            // this.textureMapping = textureMappingDummy;
+        }
 
         this.megaStateFlags.frontFace = GfxFrontFaceMode.CW;
         // this.megaStateFlags.cullMode = GfxCullMode.BACK;
@@ -237,11 +283,13 @@ export class SlyMeshRenderer {
     public prepareToRender(renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput) {
         const renderInst = renderInstManager.newRenderInst();
         renderInst.setInputLayoutAndState(this.geometryData.inputLayout, this.geometryData.inputState);
-        // textureMappingScratch[0].copy(this.textureMapping);
-        renderInst.setSamplerBindingsFromTextureMappings(textureMappingScratch);
+        if (this.textureMapping) {
+            textureMappingScratch[0].copy(this.textureMapping);
+            renderInst.setSamplerBindingsFromTextureMappings(textureMappingScratch);
+        }
         renderInst.setMegaStateFlags(this.megaStateFlags);
 
-        let offs = renderInst.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 12);
+        let offs = renderInst.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4*3);
         const d = renderInst.mapUniformBufferF32(SlyProgram.ub_ShapeParams);
         computeViewMatrix(modelViewScratch, viewerInput.camera);
         mat4.mul(modelViewScratch, modelViewScratch, this.modelMatrix);
@@ -253,7 +301,6 @@ export class SlyMeshRenderer {
         // offs += fillVec4(d, offs, levelRenderData.baseDiffuse, levelRenderData.baseAmbient, 0, 0);
 
         renderInst.drawIndexes(this.geometryData.indexCount);
-        // console.log(this.geometryData.indexCount);
         renderInstManager.submitRenderInst(renderInst);
     }
 }
