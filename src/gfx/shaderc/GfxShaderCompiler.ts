@@ -5,7 +5,7 @@ import { GfxShaderLibrary } from "../helpers/GfxShaderLibrary";
 
 // Shader preprocessor / compiler infrastructure for GLSL.
 
-type DefineMap = Map<string, string>;
+export type DefineMap = Map<string, string>;
 
 function defineStr(k: string, v: string): string {
     return `#define ${k} ${v}`;

@@ -1,4 +1,3 @@
-
 export const PARSE_MESHES = true;
 export const MESH_EXPORT = false;
 export const SEPARATE_OBJECT_SUBMESHES = false;
