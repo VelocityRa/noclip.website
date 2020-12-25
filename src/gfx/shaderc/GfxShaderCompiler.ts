@@ -5,7 +5,7 @@ import { GfxShaderLibrary } from "../helpers/ShaderHelpers";
 
 // Shader preprocessor / compiler infrastructure for GLSL.
 
-type DefineMap = Map<string, string>;
+export type DefineMap = Map<string, string>;
 
 export function preprocessShader_GLSL(vendorInfo: GfxVendorInfo, type: 'vert' | 'frag', source: string, defines: DefineMap | null = null): string {
     // Garbage WebGL2 shader compiler until I get something better down the line...

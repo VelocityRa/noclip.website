@@ -6,6 +6,8 @@ import { assert, hexzero, hexzero0x, leftPad } from '../util';
 import { downloadCanvasAsPng, downloadText } from "../DownloadUtils";
 import { range, range_end } from '../MathHelpers';
 import * as Settings from './SlyConstants';
+import { vec4, vec3, mat4, ReadonlyMat4, ReadonlyVec3 } from "gl-matrix";
+import { drawWorldSpaceAABB, getDebugOverlayCanvas2D, drawWorldSpacePoint } from "../DebugJunk";
 
 // TODO: move?
 export class DataStream {
@@ -183,12 +185,13 @@ export class Texture {
 }
 
 export interface SzmeChunk {
-    unkVec: vec3;
+    origin: vec3;
     positions: Float32Array; // vec3
     rotations: Float32Array; // vec3
     unkColors: Uint32Array;  // RGBA
     texCoords: Float32Array; // vec2
-    lighting: Uint32Array;   // RGBA
+    unkIndices: Uint32Array;   // RGBA
+    // lightingFloats: Float32Array;   // vec4
     texIndex: number;        // u16
     unkByte1: number;        // u8
     unkByte2: number;        // u8
@@ -204,13 +207,16 @@ export interface MeshChunk {
     positions: Float32Array; // vec3
     normals: Float32Array;  // vec3
     texCoords: Float32Array;  // vec2
-    unk_0x20: number;
+    vertexColor: Uint32Array; // RGBA (?)
+    vertexColorFloats: Float32Array;   // vec4
 
     trianglesIndices: Uint16Array;
     unkIndices: Uint16Array;
 
     szme: SzmeChunk | undefined;
 }
+
+export let totalChunkIndex = 0;
 
 export class Mesh {
     static readonly szmsMagic = 0x534D5A53; // "SZMS"
@@ -276,21 +282,28 @@ export class Mesh {
             let positions = new Float32Array(vertexCount * 3);
             let normals = new Float32Array(vertexCount * 3)
             let texCoords = new Float32Array(vertexCount * 2);
-            let unk_0x20 = 0;
+            let vertexColor = new Uint32Array(vertexCount);
+            let vertexColorFloats = new Float32Array(vertexCount * 4);
 
             for (let i = 0; i < vertexCount; ++i) {
-                positions[i * 3] = stream.readFloat32();
+                positions[i * 3 + 0] = stream.readFloat32();
                 positions[i * 3 + 1] = stream.readFloat32();
                 positions[i * 3 + 2] = stream.readFloat32();
 
-                normals[i * 3] = stream.readFloat32();
+                normals[i * 3 + 0] = stream.readFloat32();
                 normals[i * 3 + 1] = stream.readFloat32();
                 normals[i * 3 + 2] = stream.readFloat32();
 
-                texCoords[i * 2] = stream.readFloat32();
+                texCoords[i * 2 + 0] = stream.readFloat32();
                 texCoords[i * 2 + 1] = stream.readFloat32();
 
-                unk_0x20 = stream.readUint32();
+                vertexColor[i] = stream.readUint32();
+
+                stream.offs -= 4;
+                vertexColorFloats[i * 4 + 0] = stream.readUint8() / 255;
+                vertexColorFloats[i * 4 + 1] = stream.readUint8() / 255;
+                vertexColorFloats[i * 4 + 2] = stream.readUint8() / 255;
+                vertexColorFloats[i * 4 + 3] = stream.readUint8() / 255;
             }
 
             stream.offs = startOffs + indexHeaderOffset;
@@ -324,7 +337,7 @@ export class Mesh {
             }
 
             let szme: (SzmeChunk | undefined) = undefined;
-            this.chunks.push({ positions, normals, texCoords, unk_0x20, trianglesIndices, unkIndices, szme});
+            this.chunks.push({ positions, normals, texCoords, vertexColor, vertexColorFloats, trianglesIndices, unkIndices, szme});
         }
 
         // Read SZME header
@@ -381,7 +394,7 @@ export class Mesh {
 
             if (szmeChunkCount < 0xFF) {
                 for (let szmeChunkIndex = 0; szmeChunkIndex < szmeChunkCount; ++szmeChunkIndex) {
-                    const unkVec: vec3 = stream.readVec3();
+                    const origin: vec3 = stream.readVec3();
 
                     const unkFloat = stream.readFloat32();
                     const unk_count1 = stream.readUint8();
@@ -394,14 +407,14 @@ export class Mesh {
 
                     let positions = new Float32Array(unk_count1 * 3);
                     for (let i = 0; i < unk_count1 * 3; i += 3) {
-                        positions[i] = stream.readFloat32();
+                        positions[i + 0] = stream.readFloat32();
                         positions[i + 1] = stream.readFloat32();
                         positions[i + 2] = stream.readFloat32();
                     }
 
                     let rotations = new Float32Array(unk_count2 * 3);
                     for (let i = 0; i < unk_count2 * 3; i += 3) {
-                        rotations[i] = stream.readFloat32();
+                        rotations[i + 0] = stream.readFloat32();
                         rotations[i + 1] = stream.readFloat32();
                         rotations[i + 2] = stream.readFloat32();
                     }
@@ -413,13 +426,21 @@ export class Mesh {
 
                     let texCoords = new Float32Array(unk_count4 * 2);
                     for (let i = 0; i < unk_count4 * 2; i += 2) {
-                        texCoords[i] = stream.readFloat32();
+                        texCoords[i + 0] = stream.readFloat32();
                         texCoords[i + 1] = stream.readFloat32();
                     }
 
-                    let lighting = new Uint32Array(unk_count5);
+                    let unkIndices = new Uint32Array(unk_count5);
+                    // let unkIndicesFloats = new Float32Array(unk_count5 * 4);
                     for (let i = 0; i < unk_count5; i++) {
-                        lighting[i] = stream.readUint32();
+                        unkIndices[i] = stream.readUint32();
+                        // stream.offs -= 4;
+                        // unkIndicesFloats[i * 4 + 0] = stream.readUint8() / 255;
+                        // unkIndicesFloats[i * 4 + 1] = stream.readUint8() / 255;
+                        // unkIndicesFloats[i * 4 + 2] = stream.readUint8() / 255;
+                        // unkIndicesFloats[i * 4 + 3] = stream.readUint8() / 255;
+                        // if (szmeChunkIndex == 0)
+                            // console.log(`AT ${hexzero0x(stream.offs-4)} is [${lightingFloats[i * 4 + 0]}, ${lightingFloats[i * 4 + 1]}, ${lightingFloats[i * 4 + 2]}, ${lightingFloats[i * 4 + 3]},]`);
                     }
 
                     let texIndex = stream.readUint16();
@@ -427,7 +448,11 @@ export class Mesh {
                     let unkByte1 = stream.readUint8();
                     let unkByte2 = stream.readUint8();
 
-                    this.chunks[szmeChunkIndex].szme = { unkVec, positions, rotations, unkColors, texCoords, lighting, texIndex, unkByte1, unkByte2 };
+                    // if (stream.offs == 0x1B3830)
+                    //     console.log(`AYYY ${totalChunkIndex}`);
+
+                    this.chunks[szmeChunkIndex].szme = { origin, positions, rotations, unkColors, texCoords, unkIndices, texIndex, unkByte1, unkByte2 };
+                    totalChunkIndex++;
                 }
             } else {
                 console.warn(`skipping szme data of index ${szmeOffs + 0x23}, has too many chunks`);
