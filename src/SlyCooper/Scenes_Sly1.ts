@@ -125,21 +125,16 @@ class Sly1LevelSceneDesc implements SceneDesc {
                     let clutMeta = clutMetaEntries[clutIndex];
                     let imageMeta = imageMetaEntries[imageIndex];
 
-                    if (clutMeta.colorCount == 256) {
-                        const width = imageMeta.width;
-                        const height = imageMeta.height;
-                        // console.log(`clutMeta: ${clutMeta.offset} imageMeta: ${imageMeta.offset}`);
-                        // console.log(`w: ${width} h: ${height} C: ${hexzero(clutMeta.offset, 8)} I: ${hexzero(imageMeta.offset, 8)}`);
-                        const paletteBuf = bin.slice(this.tex_pal_offs + clutMeta.offset);
-                        const imageBuf = bin.slice(this.tex_pal_offs + imageMeta.offset)
-                        const name = sprintf('Id %03d-%03d-%03d Res %04dx%04d Clt %05X Img %06X',
-                            texEntryIdx, clutIndex, imageIndex, width, height, clutMeta.offset, imageMeta.offset);
-                        const texture = new Data.Texture(paletteBuf, imageBuf, width, height, name);
-                        this.textures[texEntryIdx] = texture;
-                    } else {
-                        // todo
-                        console.log(`skip, colorcount: ${clutMeta.colorCount}`);
-                    }
+                    const width = imageMeta.width;
+                    const height = imageMeta.height;
+                    // console.log(`clutMeta: ${clutMeta.offset} imageMeta: ${imageMeta.offset}`);
+                    // console.log(`w: ${width} h: ${height} C: ${hexzero(clutMeta.offset, 8)} I: ${hexzero(imageMeta.offset, 8)}`);
+                    const paletteBuf = bin.slice(this.tex_pal_offs + clutMeta.offset);
+                    const imageBuf = bin.slice(this.tex_pal_offs + imageMeta.offset)
+                    const name = sprintf('Id %03d-%03d-%03d Res %04dx%04d Clt %05X Img %06X Cols %03d',
+                        texEntryIdx, clutIndex, imageIndex, width, height, clutMeta.offset, imageMeta.offset, clutMeta.colorCount);
+                    const texture = new Data.Texture(paletteBuf, imageBuf, width, height, clutMeta.colorCount, name);
+                    this.textures[texEntryIdx] = texture;
                 };
 
                 const is1Img1Pal = (texEntry.clutIndices.length == texEntry.imageIndices.length);

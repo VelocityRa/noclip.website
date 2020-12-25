@@ -126,7 +126,7 @@ export class Texture {
 
     private static csm1ClutIndices = getCsm1ClutIndices();
     constructor(paletteBuf: ArrayBufferSlice, imageBuf: ArrayBufferSlice,
-        public width: number, public height: number, public name: string = "N/A") {
+        public width: number, public height: number, colorCount: number, public name: string = "N/A") {
 
         // TODO
         this.texels_rgba = new Uint8Array(width * height * 4);
@@ -135,8 +135,9 @@ export class Texture {
         let palette_slice = paletteBuf.createTypedArray(Uint8Array);
 
         for (let i of range_end(0, width * height)) {
-            // const idx = texels_slice[i] * 4;
-            const idx = Texture.csm1ClutIndices[texels_slice[i]] * 4;
+            let idx = texels_slice[i] * 4;
+            if (colorCount == 256)
+                idx = Texture.csm1ClutIndices[texels_slice[i]] * 4;
 
             // const x = i % width;
             // const y = Math.floor(i / width);
@@ -148,7 +149,7 @@ export class Texture {
             this.texels_rgba[offs + 0] = palette_slice[idx + 0];
             this.texels_rgba[offs + 1] = palette_slice[idx + 1];
             this.texels_rgba[offs + 2] = palette_slice[idx + 2];
-            this.texels_rgba[offs + 3] = 0xFF; // palette_slice[idx + 3] * 2;
+            this.texels_rgba[offs + 3] = palette_slice[idx + 3]; // 0xFF; // palette_slice[idx + 3] * 2;
         }
     }
 
