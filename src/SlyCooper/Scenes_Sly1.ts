@@ -64,7 +64,9 @@ function Uint8Array_indexOfMulti(arr: Uint8Array, searchElements: Uint8Array, fr
 
 class Sly1LevelSceneDesc implements SceneDesc {
     private meshes: Data.Mesh[] = [];
-    private textures: (Data.Texture | null)[] = [];
+    private texturesDiffuse: (Data.Texture | null)[] = [];
+    private texturesAmbient: (Data.Texture | null)[] = [];
+    private texturesUnk: (Data.Texture | null)[] = [];
 
     constructor(public id: string, public name: string, private tex_pal_offs: number) {
     }
@@ -108,12 +110,21 @@ class Sly1LevelSceneDesc implements SceneDesc {
             console.log(`img #: ${imageMetaEntries.length}`);
             console.log(`tex #: ${textureEntries.length}`);
 
-            for (let i = 0; i < textureEntries.length; ++i)
-                this.textures.push(null);
+            enum TextureType {
+                Diffuse,
+                Ambient,
+                Unk
+            }
+
+            for (let i = 0; i < textureEntries.length; ++i) {
+                this.texturesDiffuse.push(null);
+                this.texturesAmbient.push(null);
+                this.texturesUnk.push(null);
+            }
 
             let texEntryIdx = 0;
             for (let texEntry of textureEntries) {
-                let makeTexture = (clutIndex: number, imageIndex: number) => {
+                let makeTexture = (clutIndex: number, imageIndex: number, type: TextureType = TextureType.Diffuse) => {
                     if (clutIndex >= clutMetaEntries.length) {
                         console.log(`warn: clutIndex (${clutIndex}) out of bounds, skipping`);
                         return;
@@ -131,10 +142,21 @@ class Sly1LevelSceneDesc implements SceneDesc {
                     // console.log(`w: ${width} h: ${height} C: ${hexzero(clutMeta.offset, 8)} I: ${hexzero(imageMeta.offset, 8)}`);
                     const paletteBuf = bin.slice(this.tex_pal_offs + clutMeta.offset);
                     const imageBuf = bin.slice(this.tex_pal_offs + imageMeta.offset)
-                    const name = sprintf('Id %03d-%03d-%03d Res %04dx%04d Clt %05X Img %06X Cols %03d',
+                    const name = sprintf(`Id %03d-%03d-%03d Res %04dx%04d Clt %05X Img %06X Cols %03d`,
                         texEntryIdx, clutIndex, imageIndex, width, height, clutMeta.offset, imageMeta.offset, clutMeta.colorCount);
-                    const texture = new Data.Texture(paletteBuf, imageBuf, width, height, clutMeta.colorCount, name);
-                    this.textures[texEntryIdx] = texture;
+                    const texture = new Data.Texture(paletteBuf, imageBuf, width, height, clutMeta.colorCount, clutMeta.colorSize, name);
+
+                    switch (type) {
+                        case TextureType.Diffuse:
+                            this.texturesDiffuse[texEntryIdx] = texture;
+                            break;
+                        case TextureType.Ambient:
+                            this.texturesAmbient[texEntryIdx] = texture;
+                            break;
+                        case TextureType.Unk:
+                            this.texturesUnk[texEntryIdx] = texture;
+                            break;
+                    }
                 };
 
                 const is1Img1Pal = (texEntry.clutIndices.length == texEntry.imageIndices.length);
@@ -145,16 +167,23 @@ class Sly1LevelSceneDesc implements SceneDesc {
                     // for (let i = 0; i < texEntry.clutIndices.length; i++) {
                     //     makeTexture(texEntry.clutIndices[i], texEntry.imageIndices[i]);
                     // }
-                    console.log(`1img1pal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
+                    // console.log(`1img1pal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
                     // Use first one
                     makeTexture(texEntry.clutIndices[0], texEntry.imageIndices[0]);
                 } else if (is1ImgManyPal) {
                     // for (let palIndex of texEntry.clutIndices) {
                     //     makeTexture(palIndex, texEntry.imageIndices[0]);
                     // }
-                    console.log(`1imgNpal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
-                    // Use diffuse
-                    makeTexture(texEntry.clutIndices[1], texEntry.imageIndices[0]);
+                    // console.log(`1imgNpal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
+
+                    if (texEntry.clutIndices.length == 3) {
+                        makeTexture(texEntry.clutIndices[0], texEntry.imageIndices[0], TextureType.Ambient);
+                        makeTexture(texEntry.clutIndices[1], texEntry.imageIndices[0], TextureType.Diffuse);
+                        makeTexture(texEntry.clutIndices[2], texEntry.imageIndices[0], TextureType.Unk);
+                    } else {
+                        makeTexture(texEntry.clutIndices[0], texEntry.imageIndices[0]);
+                    }
+
                 } else if (isManyImgManyPal) {
                     if (!Number.isInteger(texEntry.clutIndices.length / texEntry.imageIndices.length)) {
                         console.log(`WARN: nonint m2m ${texEntryIdx} ${texEntry.clutIndices.length} ${texEntry.imageIndices.length}`);
@@ -164,7 +193,7 @@ class Sly1LevelSceneDesc implements SceneDesc {
                     //     let imgIndex = Math.floor(i / divPalImg);
                     //     makeTexture(texEntry.clutIndices[i], texEntry.imageIndices[imgIndex]);
                     // }
-                    console.log(`NimgMpal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
+                    // console.log(`NimgMpal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
                     // Use first ones
                     makeTexture(texEntry.clutIndices[0], texEntry.imageIndices[0]);
                 } else {
@@ -258,12 +287,19 @@ class Sly1LevelSceneDesc implements SceneDesc {
             }
         }
 
-        const renderer = new SlyRenderer(device, this.meshes, this.textures);
+        const renderer = new SlyRenderer(device, this.meshes, this.texturesDiffuse, this.texturesAmbient, this.texturesUnk);
 
-        for (let tex of this.textures) {
+        let addTexToViewer = async (tex: (Data.Texture | null)) => {
             if (tex)
                 renderer.textureHolder.viewerTextures.push(await tex.toCanvas());
+        };
+
+        for (let i = 0; i < this.texturesDiffuse.length; i++) {
+            addTexToViewer(this.texturesDiffuse[i]);
+            addTexToViewer(this.texturesAmbient[i]);
+            addTexToViewer(this.texturesUnk[i]);
         }
+
         return renderer;
     }
 }
