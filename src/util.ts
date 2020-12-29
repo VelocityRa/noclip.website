@@ -92,8 +92,17 @@ export function leftPad(S: string, spaces: number, ch: string = '0'): string {
     return S;
 }
 
-export function hexzero(n: number, spaces: number): string {
+export function spacePad(S: string, spaces: number) {
+    return leftPad(S, spaces, ' ');
+}
+
+export function hexzero(n: number, spaces: number = 8): string {
     let S = n.toString(16);
+    return leftPad(S, spaces);
+}
+
+export function binzero(n: number, spaces: number = 8): string {
+    let S = n.toString(2);
     return leftPad(S, spaces);
 }
 
@@ -102,6 +111,13 @@ export function hexzero0x(n: number, spaces: number = 8): string {
         return `-0x${hexzero(-n, spaces)}`;
     else
         return `0x${hexzero(n, spaces)}`;
+}
+
+export function binzero0b(n: number, spaces: number = 8): string {
+    if (n < 0)
+        return `-0b${binzero(-n, spaces)}`;
+    else
+        return `0b${binzero(n, spaces)}`;
 }
 
 export function hexdump(b_: ArrayBufferSlice | ArrayBuffer, offs: number = 0, length: number = 0x100): void {

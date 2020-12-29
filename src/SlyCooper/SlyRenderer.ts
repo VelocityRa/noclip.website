@@ -9,7 +9,7 @@ import { GfxRenderInstManager, GfxRendererLayer, makeSortKeyOpaque } from "../gf
 import { fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v } from "../gfx/helpers/UniformBufferHelpers";
 import { mat4, vec3, vec2, vec4 } from "gl-matrix";
 import { computeViewMatrix, CameraController } from "../Camera";
-import { nArray, assertExists, hexzero0x } from "../util";
+import { nArray, assertExists, hexzero0x, hexzero, binzero, binzero0b } from "../util";
 import { TextureMapping } from "../TextureHolder";
 import { MathConstants, scaleMatrix } from "../MathHelpers";
 import { AABB } from "../Geometry";
@@ -21,7 +21,7 @@ import { Color, Magenta, colorToCSS, Red, Green, Blue, Cyan } from "../Color";
 class SlyRenderHacks {
     disableTextures = false;
     disableVertexColors = false;
-    // disableLighting = false;
+    disableAmbientLighting = true;
 }
 
 class SlyDebugHacks {
@@ -49,11 +49,12 @@ layout(row_major, std140) uniform ub_ShapeParams {
 #define u_BaseDiffuse 1.0
 #define u_BaseAmbient 0.2
 
-uniform sampler2D u_Texture[1];
+uniform sampler2D u_Texture[3];
 
-//#define u_AmbientTexture u_Texture[0];
-//#define u_DiffuseTexture u_Texture[1];
-//#define u_UnkTexture u_Texture[2];
+// todo use these
+#define u_DiffuseTexture SAMPLER_2D(u_Texture[0])
+#define u_AmbientTexture SAMPLER_2D(u_Texture[1])
+#define u_UnkTexture SAMPLER_2D(u_Texture[2])
 `;
 
     public vert: string = `
@@ -83,16 +84,16 @@ in vec3 v_Normal;
 in vec3 v_VertexColor;
 
 void main() {
-    vec2 t_DiffuseTexCoord = mod(v_TexCoord, vec2(1.0, 1.0));
+    vec2 t_TexCoord = v_TexCoord; // mod(v_TexCoord, vec2(1.0, 1.0));
 
 #if ENABLE_TEXTURES
-    vec3 t_DiffuseMapColor = texture(SAMPLER_2D(u_Texture[0]), t_DiffuseTexCoord.xy).rgb;
-    // TODO: this is probably wrong (artifacts can be seen)
-    // vec4 t_AmbientMapColor = texture(SAMPLER_2D(u_AmbientTexture), t_DiffuseTexCoord.xy);
-    vec4 t_AmbientMapColor = vec4(1.0);
+    vec3 t_DiffuseMapColor = texture(u_DiffuseTexture, t_TexCoord.xy).rgb;
+    vec4 t_AmbientMapColor = texture(u_AmbientTexture, t_TexCoord.xy);
+    vec3 t_UnkMapColor = texture(u_UnkTexture, t_TexCoord.xy).rgb;
 #else
     vec3 t_DiffuseMapColor = vec3(1.0);
-    vec4 t_AmbientMapColor = vec4(1.0);
+    vec4 t_AmbientMapColor = vec4(0.0, 0.0, 0.0, texture(u_AmbientTexture, t_TexCoord.xy).a);
+    vec3 t_UnkMapColor = vec3(1.0);
 #endif
 
     // float t_LightFalloff = clamp(dot(u_LightDirection.xyz, v_Normal.xyz), 0.0, 1.0);
@@ -101,12 +102,9 @@ void main() {
     // gl_FragColor.rgb = t_Illum * t_DiffuseMapColor.rgb;
     // gl_FragColor.a = t_DiffuseMapColor.a;
 
-    // gl_FragColor = vec4(t_DiffuseTexCoord, 0.0, 1.0);
+    // gl_FragColor = vec4(t_TexCoord, 0.0, 1.0);
 
     // gl_FragColor = vec4(v_Normal, 1.0);
-
-    // gl_FragColor.rgb = t_DiffuseMapColor.rgb;
-    // gl_FragColor.a = 1.0;
 
 #if ENABLE_VERTEX_COLORS
     vec3 vertexColor = v_VertexColor;
@@ -114,16 +112,34 @@ void main() {
     vec3 vertexColor = vec3(1.0);
 #endif
 
-    // gl_FragColor.rgb = vertexColor * t_DiffuseMapColor;
+    float vertexLighting = 0.22;
+    vec4 inv_lit = vec4(0.105, 0.105, 0.105, 0.501);
+    float tc1_w = 0.5;
 
+    vec3 diffuseFinal = t_DiffuseMapColor * vertexColor * vertexLighting;
+
+#if ENABLE_AMBIENT_LIGHTING
     vec3 lightDirection = normalize(vec3(0.1027, 0.02917, 0.267));
-    vec3 lightColor = vec3(10./255., 23./255., 26./255.) * 1.2;
-
+    vec3 lightColor = vec3(10./255., 23./255., 26./255.) * 1.0;
     float ambientLambert = clamp(max(dot(v_Normal.xyz, lightDirection), 0.0), 0.0, 1.0);
-    vec3 ambient = lightColor * ambientLambert * t_AmbientMapColor.rgb;
+    vec3 ambientColor = lightColor * ambientLambert;
 
-    gl_FragColor.rgb = ambient + t_DiffuseMapColor * vertexColor;
-    gl_FragColor.a = 1.0;
+    vec3 ambientFinal = t_UnkMapColor.rgb * ambientColor;
+    vec3 unkFinal = (inv_lit.rgb * t_AmbientMapColor.rgb + diffuseFinal) / 2.0;
+#else
+    vec3 ambientFinal = vec3(0.0);
+    vec3 unkFinal = diffuseFinal;
+#endif
+
+
+    gl_FragColor.a = t_AmbientMapColor.a;
+    gl_FragColor.a *= inv_lit.w * 4.;
+
+    // TODO: implement more properly
+    if (gl_FragColor.a == 0.0)
+        discard;
+
+    gl_FragColor.rgb = (ambientFinal * tc1_w + unkFinal) * 4.0;
 }
 `;
 
@@ -136,11 +152,12 @@ void main() {
 
         this.defines.set("ENABLE_TEXTURES", boolToStr(renderHacks.disableTextures));
         this.defines.set("ENABLE_VERTEX_COLORS", boolToStr(renderHacks.disableVertexColors));
+        this.defines.set("ENABLE_AMBIENT_LIGHTING", boolToStr(renderHacks.disableAmbientLighting));
     }
 }
 
 const bindingLayouts: GfxBindingLayoutDescriptor[] = [
-    { numUniformBuffers: 2, numSamplers: 1, },
+    { numUniformBuffers: 2, numSamplers: 3, },
 ];
 
 const modelViewScratch = mat4.create();
@@ -153,15 +170,17 @@ export class SlyRenderer implements Viewer.SceneGfx {
     private renderHelper: GfxRenderHelper;
     private modelMatrix: mat4 = mat4.create();
     private meshRenderers: SlyMeshRenderer[] = [];
+    private meshRenderersReverse: SlyMeshRenderer[] = [];
 
     private renderHacks: SlyRenderHacks = new SlyRenderHacks();
     private debugHacks: SlyDebugHacks = new SlyDebugHacks();
+    private flagLayers: FlagLayer[] = [];
 
     private createShader(device: GfxDevice) {
         this.program = preprocessProgramObj_GLSL(device, new SlyProgram(this.renderHacks));
     }
 
-    constructor(device: GfxDevice, meshes: Data.Mesh[], textures: (Data.Texture | null)[]) {
+    constructor(device: GfxDevice, meshes: Data.Mesh[], texturesDiffuse: (Data.Texture | null)[], texturesAmbient: (Data.Texture | null)[], texturesUnk: (Data.Texture | null)[]) {
         this.renderHelper = new GfxRenderHelper(device);
 
         const gfxCache = this.renderHelper.getCache();
@@ -169,19 +188,33 @@ export class SlyRenderer implements Viewer.SceneGfx {
         for (let mesh of meshes) {
             for (let meshChunk of mesh.chunks) {
                 const geometryData = new GeometryData(device, gfxCache, meshChunk);
-                let textureData: (TextureData | null) = null;
+
+                let textureData: (TextureData | null)[] = nArray(3, () => null);
                 if (meshChunk.szme) {
-                    const texture = textures[meshChunk.szme.texIndex];
-                    if (texture) {
-                        // console.log(`mesh at ${hexzero0x(mesh.offset)} gets texID ${hexzero0x(meshChunk.szme.texIndex)}`);
-                        textureData = new TextureData(device, gfxCache, texture)
+                    const texIndex = meshChunk.szme.texIndex;
+                    const textureDiffuse = texturesDiffuse[texIndex];
+                    if (textureDiffuse) {
+                        // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Diffuse texID ${hexzero0x(texIndex)}`);
+                        textureData[0] = new TextureData(device, gfxCache, textureDiffuse)
+
+                        const textureAmbient = texturesAmbient[texIndex];
+                        if (textureAmbient) {
+                            // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Ambient texID ${hexzero0x(texIndex)}`);
+                            textureData[1] = new TextureData(device, gfxCache, textureAmbient)
+                        }
+                        const textureUnk = texturesUnk[texIndex];
+                        if (textureUnk) {
+                            // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Unk texID ${hexzero0x(texIndex)}`);
+                            textureData[2] = new TextureData(device, gfxCache, textureUnk)
+                        }
                     }
                 }
-                const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk);
 
+                const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk);
                 this.meshRenderers.push(meshRenderer);
             }
         }
+        // this.meshRenderersReverse = this.meshRenderers.slice().reverse();
     }
 
     public prepareToRender(device: GfxDevice, hostAccessPass: GfxHostAccessPass, viewerInput: Viewer.ViewerRenderInput, renderInstManager: GfxRenderInstManager) {
@@ -200,6 +233,10 @@ export class SlyRenderer implements Viewer.SceneGfx {
         for (let meshRenderer of this.meshRenderers) {
             meshRenderer.prepareToRender(renderInstManager, viewerInput);
         }
+        // for (let meshRenderer of this.meshRenderersReverse) {
+        //     meshRenderer.prepareToRender(renderInstManager, viewerInput);
+        // }
+
 
         renderInstManager.popTemplateRenderInst();
 
@@ -300,22 +337,32 @@ export class SlyRenderer implements Viewer.SceneGfx {
         this.program = null;
     }
 
+    private setAmbientLightingEnabled(enabled: boolean) {
+        this.renderHacks.disableAmbientLighting = !enabled;
+        this.program = null;
+    }
+
     public createPanels(): UI.Panel[] {
         const panels: UI.Panel[] = [];
 
         const renderHacksPanel = new UI.Panel();
         renderHacksPanel.customHeaderBackgroundColor = UI.COOL_BLUE_COLOR;
         renderHacksPanel.setTitle(UI.RENDER_HACKS_ICON, 'Render Hacks');
-        const enableVertexColorsCheckbox = new UI.Checkbox('Enable Vertex Colors', true);
+        const enableVertexColorsCheckbox = new UI.Checkbox('Enable Vertex Colors', !this.renderHacks.disableVertexColors);
         enableVertexColorsCheckbox.onchanged = () => {
             this.setVertexColorsEnabled(enableVertexColorsCheckbox.checked);
         };
         renderHacksPanel.contents.appendChild(enableVertexColorsCheckbox.elem);
-        const enableTextures = new UI.Checkbox('Enable Textures', true);
+        const enableTextures = new UI.Checkbox('Enable Textures', !this.renderHacks.disableTextures);
         enableTextures.onchanged = () => {
             this.setTexturesEnabled(enableTextures.checked);
         };
         renderHacksPanel.contents.appendChild(enableTextures.elem);
+        const enableAmbientLighting = new UI.Checkbox('Enable Ambient Lighting', !this.renderHacks.disableAmbientLighting);
+        enableAmbientLighting.onchanged = () => {
+            this.setAmbientLightingEnabled(enableAmbientLighting.checked);
+        };
+        renderHacksPanel.contents.appendChild(enableAmbientLighting.elem);
         panels.push(renderHacksPanel);
 
         const debugPanel = new UI.Panel();
@@ -338,6 +385,14 @@ export class SlyRenderer implements Viewer.SceneGfx {
         debugPanel.contents.appendChild(drawSzmePositionsCheckbox.elem);
         panels.push(debugPanel);
 
+        // const layersPanel = new UI.LayerPanel();
+        // layersPanel.setLayers(this.meshRenderers);
+        // panels.push(layersPanel);
+
+        this.flagLayers = createFlagLayers(this.meshRenderers)
+        const layersPanel = new UI.LayerPanel(this.flagLayers, 'Flag Layers');
+        panels.push(layersPanel);
+
         return panels;
     }
 
@@ -345,6 +400,40 @@ export class SlyRenderer implements Viewer.SceneGfx {
         this.renderHelper.destroy(device);
         this.renderTarget.destroy(device);
     }
+}
+
+class FlagLayer {
+    public name: string
+    public visible: boolean = true;
+
+    constructor(private flagValue: number, private meshRenderers: SlyMeshRenderer[]) {
+        this.name = `${binzero(flagValue, 9)} (${hexzero0x(flagValue, 3)})`;
+    }
+    public setVisible(v: boolean): void {
+        this.visible = v;
+
+        for (let meshRenderer of this.meshRenderers) {
+            if (meshRenderer.meshChunk.flags == this.flagValue)
+                meshRenderer.visible = v;
+        }
+    }
+}
+
+function createFlagLayers(meshRenderers: SlyMeshRenderer[]): FlagLayer[] {
+    const flagValues = [0x0, 0x2, 0x4, 0x6, 0xC, 0x10, 0x12, 0x14, 0x16, 0x20, 0x30, 0x40, 0x42, 0x44, 0x46, 0x56, 0x80, 0xB0, 0x102, 0x104, 0x142, 0x156];
+
+    // TODO: disable for release
+    for (let meshRenderer of meshRenderers) {
+        if (!flagValues.includes(meshRenderer.meshChunk.flags)) {
+            console.warn(`no layer for flags ${hexzero(meshRenderer.meshChunk.flags)} in mesh of ${meshRenderer.meshChunk.flags}`);
+        }
+    }
+
+    let flagLayers: FlagLayer[] = [];
+    for (let flagValue of flagValues) {
+        flagLayers.push(new FlagLayer(flagValue, meshRenderers));
+    }
+    return flagLayers;
 }
 
 import { GfxBuffer, GfxInputLayout, GfxInputState, GfxBufferUsage, GfxVertexAttributeDescriptor, GfxFormat, GfxInputLayoutBufferDescriptor, GfxVertexBufferFrequency } from "../gfx/platform/GfxPlatform";
@@ -439,10 +528,8 @@ class TextureData {
         return gfxTexture;
     }
 
-    constructor(device: GfxDevice, gfxCache: GfxRenderCache, texture: Data.Texture) {
-        this.texture = this.makeGfxTexture(device, texture);
-
-        this.sampler = gfxCache.createSampler(device, {
+    private makeGfxSampler(device: GfxDevice, gfxCache: GfxRenderCache): GfxSampler {
+        return gfxCache.createSampler(device, {
             // wrapS: GfxWrapMode.CLAMP,
             // wrapT: GfxWrapMode.CLAMP,
             wrapS: GfxWrapMode.REPEAT,
@@ -455,37 +542,74 @@ class TextureData {
             minLOD: 0, maxLOD: 0,
         });
     }
+
+    constructor(device: GfxDevice, gfxCache: GfxRenderCache, texture: Data.Texture) {
+        this.texture = this.makeGfxTexture(device, texture);
+        this.sampler = this.makeGfxSampler(device, gfxCache);
+    }
 }
 
-const textureMappingScratch = nArray(1, () => new TextureMapping());
+const textureMappingScratch = nArray(3, () => new TextureMapping());
 
 export class SlyMeshRenderer {
     public modelMatrix = mat4.create();
     public textureMatrix = mat4.create();
-    private textureMapping: (TextureMapping | null);
+    private textureMappingDiffuse: (TextureMapping | null);
+    private textureMappingAmbient: (TextureMapping | null);
+    private textureMappingUnk: (TextureMapping | null);
     private megaStateFlags: Partial<GfxMegaStateDescriptor> = {};
 
-    constructor(textureData: (TextureData | null), public geometryData: GeometryData, public meshChunk: Data.MeshChunk) {
-        if (textureData) {
-            this.textureMapping = new TextureMapping();
-            this.textureMapping.gfxTexture = textureData.texture;
-            this.textureMapping.gfxSampler = textureData.sampler;
-        } else {
-            // this.textureMapping = textureMappingDummy;
+    public name: string
+    public visible: boolean = true;
+    public setVisible(v: boolean): void {
+        this.visible = v;
+    }
+
+    constructor(textureData: (TextureData | null)[], public geometryData: GeometryData, public meshChunk: Data.MeshChunk) {
+        this.name = meshChunk.name;
+
+        if (textureData[0]) {
+            this.textureMappingDiffuse = new TextureMapping();
+            this.textureMappingDiffuse.gfxTexture = textureData[0].texture;
+            this.textureMappingDiffuse.gfxSampler = textureData[0].sampler;
+        }
+        if (textureData[1]) {
+            this.textureMappingAmbient = new TextureMapping();
+            this.textureMappingAmbient.gfxTexture = textureData[1].texture;
+            this.textureMappingAmbient.gfxSampler = textureData[1].sampler;
+        }
+        if (textureData[2]) {
+            this.textureMappingUnk = new TextureMapping();
+            this.textureMappingUnk.gfxTexture = textureData[2].texture;
+            this.textureMappingUnk.gfxSampler = textureData[2].sampler;
         }
 
         this.megaStateFlags.frontFace = GfxFrontFaceMode.CW;
         // this.megaStateFlags.cullMode = GfxCullMode.BACK;
         this.megaStateFlags.cullMode = GfxCullMode.NONE;
 
+        setAttachmentStateSimple(this.megaStateFlags, {
+            blendMode: GfxBlendMode.ADD,
+            blendSrcFactor: GfxBlendFactor.SRC_ALPHA,
+            blendDstFactor: GfxBlendFactor.ONE_MINUS_SRC_ALPHA,
+        });
+
         mat4.fromXRotation(this.modelMatrix, 3 * 90 * MathConstants.DEG_TO_RAD);
     }
 
     public prepareToRender(renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput) {
+        if (!this.visible)
+            return;
+
         const renderInst = renderInstManager.newRenderInst();
         renderInst.setInputLayoutAndState(this.geometryData.inputLayout, this.geometryData.inputState);
-        if (this.textureMapping) {
-            textureMappingScratch[0].copy(this.textureMapping);
+        if (this.textureMappingDiffuse) {
+            // todo: is scratch/copy necessary? ask jasper
+            textureMappingScratch[0].copy(this.textureMappingDiffuse);
+            if (this.textureMappingAmbient)
+                textureMappingScratch[1].copy(this.textureMappingAmbient);
+            if (this.textureMappingUnk)
+                textureMappingScratch[2].copy(this.textureMappingUnk);
             renderInst.setSamplerBindingsFromTextureMappings(textureMappingScratch);
         }
         renderInst.setMegaStateFlags(this.megaStateFlags);

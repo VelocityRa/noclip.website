@@ -2971,10 +2971,10 @@ export class LayerPanel extends Panel {
     private layers: Layer[] = [];
     public onlayertoggled: (() => void) | null = null;
 
-    constructor(layers: Layer[] | null = null) {
+    constructor(layers: (Layer[] | null) = null, title: string = 'Layers') {
         super();
         this.customHeaderBackgroundColor = COOL_BLUE_COLOR;
-        this.setTitle(LAYER_ICON, 'Layers');
+        this.setTitle(LAYER_ICON, title);
         this.multiSelect = new MultiSelect();
         this.multiSelect.onitemchanged = this._onItemChanged.bind(this);
         this.contents.appendChild(this.multiSelect.elem);
