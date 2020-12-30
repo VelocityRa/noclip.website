@@ -121,18 +121,6 @@ function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function expand5to8(n: number) {
-    return (n << (8 - 5)) | (n >>> (10 - 8));
-}
-
-function expand6to8(n: number) {
-    return (n << (8 - 6)) | (n >>> (12 - 8));
-}
-
-function bswap16(low: number, high: number) {
-    return (high << 8) | low;
-}
-
 export class Texture {
     public texels_rgba: Uint8Array;
     public viewerTexture: Viewer.Texture[] = [];
@@ -151,53 +139,15 @@ export class Texture {
         // const inv_y = (-(y - (width / 2))) + width / 2 - 1;
         // const offs = (inv_y * width + x) * 4;
 
-        if (colorSize == 4) {
-            for (let i of range_end(0, width * height)) {
-                let idx: number;
-                if (colorCount == 256)
-                    idx = Texture.csm1ClutIndices[texels_slice[i]] * colorSize;
-                else
-                    idx = texels_slice[i] * colorSize;
+        for (let i of range_end(0, width * height)) {
+            const idx = Texture.csm1ClutIndices[texels_slice[i]] * 4;
+            const offs = i * 4;
 
-                const offs = i * 4;
-
-                this.texels_rgba[offs + 0] = palette_slice[idx + 0];
-                this.texels_rgba[offs + 1] = palette_slice[idx + 1];
-                this.texels_rgba[offs + 2] = palette_slice[idx + 2];
-                this.texels_rgba[offs + 3] = palette_slice[idx + 3];
-            }
-        } else {
-            for (let i of range_end(0, width * height)) {
-                const offs = i * 4;
-
-                const col = (i % 10 == 0) ? 0xFF : 0x00;
-                this.texels_rgba[offs + 0] = col;
-                this.texels_rgba[offs + 1] = 0x00;
-                this.texels_rgba[offs + 2] = col;
-                this.texels_rgba[offs + 3] = 0xFF;
-            }
+            this.texels_rgba[offs + 0] = palette_slice[idx + 0];
+            this.texels_rgba[offs + 1] = palette_slice[idx + 1];
+            this.texels_rgba[offs + 2] = palette_slice[idx + 2];
+            this.texels_rgba[offs + 3] = palette_slice[idx + 3];
         }
-        // } else if (colorSize == 2) {
-        //     for (let i of range_end(0, width * height)) {
-        //         let idx: number;
-        //         if (colorCount == 256)
-        //             idx = Texture.csm1ClutIndices[texels_slice[i]] * colorSize;
-        //         else
-        //             idx = texels_slice[i] * colorSize;
-
-        //         const offs = i * 4;
-
-        //         const low = palette_slice[idx];
-        //         const high = palette_slice[idx + 1];
-        //         const p = bswap16(high, low)
-        //         this.texels_rgba[offs + 0] = expand5to8(p & 0x1F);
-        //         this.texels_rgba[offs + 1] = expand6to8((p >>> 5) & 0x3F);
-        //         this.texels_rgba[offs + 2] = expand5to8((p >>> 11) & 0x1F);
-        //         this.texels_rgba[offs + 3] = 0xFF; // ((p >>> 15) & 1) * 255;
-        //     }
-        // } else {
-        //     console.warn(`Unsupported colorSize ${colorSize}`);
-        // }
     }
 
     public async toCanvas(): Promise<Viewer.Texture> {
