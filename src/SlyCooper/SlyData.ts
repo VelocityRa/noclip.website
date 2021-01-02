@@ -71,6 +71,8 @@ export function parseImageMetaEntries(stream: DataStream): ImageMetaEntry[] {
 export interface TextureEntry {
     clutIndices: Uint16Array
     imageIndices: Uint16Array
+    unkCol1: number
+    unkCol2: number
 }
 
 export function parseTextureEntries(stream: DataStream): TextureEntry[] {
@@ -93,12 +95,15 @@ export function parseTextureEntries(stream: DataStream): TextureEntry[] {
             clutIndices[i] = stream.readUint16();
         }
 
-        stream.offs += 0x14;
+        stream.offs += 0x4;
+        const unkCol1 = stream.readUint32();
+        const unkCol2 = stream.readUint32();
+        stream.offs += 0x8;
         let unk2 = stream.readUint16();
         if (unk2 > 0)
             stream.offs += 0x1C;
 
-        entries.push({ clutIndices: clutIndices, imageIndices: imageIndices });
+        entries.push({ clutIndices, imageIndices, unkCol1, unkCol2 });
     }
 
     return entries;
@@ -218,8 +223,9 @@ export let totalChunkIndex = 0;
 
 /*
 0b10110 (0x16) contains lights (so, emissive material?)
+0b100 is for animated textures maybe?
 */
-enum MeshFlag {
+export enum MeshFlag {
     None = 0,
 
     Static = 1 << 1,

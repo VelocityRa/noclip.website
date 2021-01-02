@@ -1,27 +1,32 @@
 import * as Viewer from '../viewer';
 import * as UI from '../ui';
 import { FakeTextureHolder } from '../TextureHolder';
-import { GfxDevice, GfxRenderPass, GfxBindingLayoutDescriptor, GfxHostAccessPass, GfxMegaStateDescriptor, GfxCullMode, GfxFrontFaceMode, GfxBlendMode, GfxBlendFactor, GfxSampler, GfxTexture, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxProgramDescriptorSimple, makeTextureDescriptor2D } from "../gfx/platform/GfxPlatform";
+import { GfxDevice, GfxRenderPass, GfxBindingLayoutDescriptor, GfxHostAccessPass, GfxMegaStateDescriptor, GfxCullMode, GfxFrontFaceMode, GfxBlendMode, GfxBlendFactor, GfxSampler, GfxTexture, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxProgramDescriptorSimple, makeTextureDescriptor2D, GfxColor } from "../gfx/platform/GfxPlatform";
 import { preprocessProgramObj_GLSL, DefineMap } from "../gfx/shaderc/GfxShaderCompiler";
 import { GfxRenderHelper } from "../gfx/render/GfxRenderGraph";
 import { BasicRenderTarget, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderTargetHelpers";
 import { GfxRenderInstManager, GfxRendererLayer, makeSortKeyOpaque } from "../gfx/render/GfxRenderer";
-import { fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v } from "../gfx/helpers/UniformBufferHelpers";
+import { fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v, fillColor } from "../gfx/helpers/UniformBufferHelpers";
 import { mat4, vec3, vec2, vec4 } from "gl-matrix";
-import { computeViewMatrix, CameraController } from "../Camera";
+import { computeViewMatrix, CameraController, computeViewMatrixSkybox } from "../Camera";
 import { nArray, assertExists, hexzero0x, hexzero, binzero, binzero0b } from "../util";
 import { TextureMapping } from "../TextureHolder";
 import { MathConstants, scaleMatrix } from "../MathHelpers";
 import { AABB } from "../Geometry";
 import { setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers";
 import * as Data from "./SlyData";
+import * as Settings from './SlyConstants';
 import { drawWorldSpaceAABB, getDebugOverlayCanvas2D, drawWorldSpacePoint } from "../DebugJunk";
 import { Color, Magenta, colorToCSS, Red, Green, Blue, Cyan } from "../Color";
+import { GfxBuffer, GfxInputLayout, GfxInputState, GfxBufferUsage, GfxVertexAttributeDescriptor, GfxFormat, GfxInputLayoutBufferDescriptor, GfxVertexBufferFrequency } from "../gfx/platform/GfxPlatform";
+import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers";
+import { GfxRenderCache } from "../gfx/render/GfxRenderCache";
 
 class SlyRenderHacks {
     disableTextures = false;
     disableVertexColors = false;
     disableAmbientLighting = true;
+    disableTextureColor = true;
 }
 
 class SlyDebugHacks {
@@ -41,6 +46,7 @@ layout(row_major, std140) uniform ub_SceneParams {
 
 layout(row_major, std140) uniform ub_ShapeParams {
     Mat4x3 u_BoneMatrix[1];
+    vec4 u_TextureColor;
 };
 
 // #define u_BaseDiffuse (u_Misc[0].x)
@@ -139,7 +145,12 @@ void main() {
     if (gl_FragColor.a == 0.0)
         discard;
 
-    gl_FragColor.rgb = (ambientFinal * tc1_w + unkFinal) * 4.0;
+    gl_FragColor.rgb = (ambientFinal * tc1_w + unkFinal) * 4.0; // * u_TextureColor.rgb;
+
+#if ENABLE_TEXTURE_COLOR
+    // gl_FragColor.rgb *= u_TextureColor.rgb;
+    gl_FragColor.rgb = u_TextureColor.rgb;
+#endif
 }
 `;
 
@@ -153,6 +164,7 @@ void main() {
         this.defines.set("ENABLE_TEXTURES", boolToStr(renderHacks.disableTextures));
         this.defines.set("ENABLE_VERTEX_COLORS", boolToStr(renderHacks.disableVertexColors));
         this.defines.set("ENABLE_AMBIENT_LIGHTING", boolToStr(renderHacks.disableAmbientLighting));
+        this.defines.set("ENABLE_TEXTURE_COLOR", boolToStr(renderHacks.disableTextureColor));
     }
 }
 
@@ -180,7 +192,7 @@ export class SlyRenderer implements Viewer.SceneGfx {
         this.program = preprocessProgramObj_GLSL(device, new SlyProgram(this.renderHacks));
     }
 
-    constructor(device: GfxDevice, meshes: Data.Mesh[], texturesDiffuse: (Data.Texture | null)[], texturesAmbient: (Data.Texture | null)[], texturesUnk: (Data.Texture | null)[]) {
+    constructor(device: GfxDevice, meshes: Data.Mesh[], texturesDiffuse: (Data.Texture | null)[], texturesAmbient: (Data.Texture | null)[], texturesUnk: (Data.Texture | null)[], textureEntries: Data.TextureEntry[]) {
         this.renderHelper = new GfxRenderHelper(device);
 
         const gfxCache = this.renderHelper.getCache();
@@ -190,6 +202,7 @@ export class SlyRenderer implements Viewer.SceneGfx {
                 const geometryData = new GeometryData(device, gfxCache, meshChunk);
 
                 let textureData: (TextureData | null)[] = nArray(3, () => null);
+                let textureEntry: (Data.TextureEntry | null) = null;
                 if (meshChunk.szme) {
                     const texIndex = meshChunk.szme.texIndex;
                     const textureDiffuse = texturesDiffuse[texIndex];
@@ -208,9 +221,11 @@ export class SlyRenderer implements Viewer.SceneGfx {
                             textureData[2] = new TextureData(device, gfxCache, textureUnk)
                         }
                     }
+                    textureEntry = textureEntries[texIndex];
                 }
 
-                const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk);
+                const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk, textureEntry);
+                meshRenderer.setVisible(isDefaultFlag(meshChunk.flags));
                 this.meshRenderers.push(meshRenderer);
             }
         }
@@ -236,7 +251,6 @@ export class SlyRenderer implements Viewer.SceneGfx {
         // for (let meshRenderer of this.meshRenderersReverse) {
         //     meshRenderer.prepareToRender(renderInstManager, viewerInput);
         // }
-
 
         renderInstManager.popTemplateRenderInst();
 
@@ -342,27 +356,42 @@ export class SlyRenderer implements Viewer.SceneGfx {
         this.program = null;
     }
 
+    private setTextureColorEnabled(enabled: boolean) {
+        this.renderHacks.disableTextureColor = !enabled;
+        this.program = null;
+    }
+
     public createPanels(): UI.Panel[] {
         const panels: UI.Panel[] = [];
 
         const renderHacksPanel = new UI.Panel();
         renderHacksPanel.customHeaderBackgroundColor = UI.COOL_BLUE_COLOR;
         renderHacksPanel.setTitle(UI.RENDER_HACKS_ICON, 'Render Hacks');
+
         const enableVertexColorsCheckbox = new UI.Checkbox('Enable Vertex Colors', !this.renderHacks.disableVertexColors);
         enableVertexColorsCheckbox.onchanged = () => {
             this.setVertexColorsEnabled(enableVertexColorsCheckbox.checked);
         };
         renderHacksPanel.contents.appendChild(enableVertexColorsCheckbox.elem);
+
         const enableTextures = new UI.Checkbox('Enable Textures', !this.renderHacks.disableTextures);
         enableTextures.onchanged = () => {
             this.setTexturesEnabled(enableTextures.checked);
         };
         renderHacksPanel.contents.appendChild(enableTextures.elem);
+
         const enableAmbientLighting = new UI.Checkbox('Enable Ambient Lighting', !this.renderHacks.disableAmbientLighting);
         enableAmbientLighting.onchanged = () => {
             this.setAmbientLightingEnabled(enableAmbientLighting.checked);
         };
         renderHacksPanel.contents.appendChild(enableAmbientLighting.elem);
+
+        const enableTextureColor = new UI.Checkbox('Enable Texture Color', !this.renderHacks.disableTextureColor);
+        enableTextureColor.onchanged = () => {
+            this.setTextureColorEnabled(enableTextureColor.checked);
+        };
+        renderHacksPanel.contents.appendChild(enableTextureColor.elem);
+
         panels.push(renderHacksPanel);
 
         const debugPanel = new UI.Panel();
@@ -404,9 +433,8 @@ export class SlyRenderer implements Viewer.SceneGfx {
 
 class FlagLayer {
     public name: string
-    public visible: boolean = true;
 
-    constructor(private flagValue: number, private meshRenderers: SlyMeshRenderer[]) {
+    constructor(private flagValue: number, private meshRenderers: SlyMeshRenderer[], public visible: boolean = true) {
         this.name = `${binzero(flagValue, 9)} (${hexzero0x(flagValue, 3)})`;
     }
     public setVisible(v: boolean): void {
@@ -419,8 +447,23 @@ class FlagLayer {
     }
 }
 
+function checkFlag(value1: number, value2: number) {
+    return (value1 & value2) != 0;
+}
+
+function getDefaultFlags() {
+    return Data.MeshFlag.Static | Data.MeshFlag.Skybox;
+}
+
+function isDefaultFlag(flagValue: number) {
+    if (Settings.SHOW_ALL_MESHES)
+        return true;
+    else
+        return checkFlag(flagValue, getDefaultFlags());
+}
+
 function createFlagLayers(meshRenderers: SlyMeshRenderer[]): FlagLayer[] {
-    const flagValues = [0x0, 0x2, 0x4, 0x6, 0xC, 0x10, 0x12, 0x14, 0x16, 0x20, 0x30, 0x40, 0x42, 0x44, 0x46, 0x56, 0x80, 0xB0, 0x102, 0x104, 0x142, 0x156];
+    const flagValues = [0x0, 0x2, 0x4, 0x6, 0xC, 0x10, 0x12, 0x14, 0x16, 0x20, 0x30, 0x40, 0x42, 0x44, 0x46, 0x56, 0x80, 0xB0, 0x102, 0x104, 0x110, 0x142, 0x156];
 
     // TODO: disable for release
     for (let meshRenderer of meshRenderers) {
@@ -431,14 +474,11 @@ function createFlagLayers(meshRenderers: SlyMeshRenderer[]): FlagLayer[] {
 
     let flagLayers: FlagLayer[] = [];
     for (let flagValue of flagValues) {
-        flagLayers.push(new FlagLayer(flagValue, meshRenderers));
+        const isVisibleByDefault = isDefaultFlag(flagValue);
+        flagLayers.push(new FlagLayer(flagValue, meshRenderers, isVisibleByDefault));
     }
     return flagLayers;
 }
-
-import { GfxBuffer, GfxInputLayout, GfxInputState, GfxBufferUsage, GfxVertexAttributeDescriptor, GfxFormat, GfxInputLayoutBufferDescriptor, GfxVertexBufferFrequency } from "../gfx/platform/GfxPlatform";
-import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers";
-import { GfxRenderCache } from "../gfx/render/GfxRenderCache";
 
 export interface VertexAttributes {
     position: vec3;
@@ -551,13 +591,26 @@ class TextureData {
 
 const textureMappingScratch = nArray(3, () => new TextureMapping());
 
+function uintToGfxColor(col: number): GfxColor {
+    const r = ((col >> 0) & 0xFF) / 255.0;
+    const g = ((col >> 8) & 0xFF) / 255.0;
+    const b = ((col >> 16) & 0xFF) / 255.0;
+    const a = ((col >> 24) & 0xFF) / 255.0;
+    return { r, g, b, a };
+}
+
 export class SlyMeshRenderer {
     public modelMatrix = mat4.create();
     public textureMatrix = mat4.create();
+
     private textureMappingDiffuse: (TextureMapping | null);
     private textureMappingAmbient: (TextureMapping | null);
     private textureMappingUnk: (TextureMapping | null);
+
     private megaStateFlags: Partial<GfxMegaStateDescriptor> = {};
+    private isSkybox: boolean = false;
+
+    private unkTexColors = new Array<GfxColor>(2);
 
     public name: string
     public visible: boolean = true;
@@ -565,7 +618,7 @@ export class SlyMeshRenderer {
         this.visible = v;
     }
 
-    constructor(textureData: (TextureData | null)[], public geometryData: GeometryData, public meshChunk: Data.MeshChunk) {
+    constructor(textureData: (TextureData | null)[], public geometryData: GeometryData, public meshChunk: Data.MeshChunk, textureEntry: (Data.TextureEntry | null)) {
         this.name = meshChunk.name;
 
         if (textureData[0]) {
@@ -584,6 +637,14 @@ export class SlyMeshRenderer {
             this.textureMappingUnk.gfxSampler = textureData[2].sampler;
         }
 
+        if (textureEntry) {
+            this.unkTexColors[0] = uintToGfxColor(textureEntry?.unkCol1);
+            this.unkTexColors[1] = uintToGfxColor(textureEntry?.unkCol2);
+        } else {
+            this.unkTexColors[0] = { r: 1, g: 1, b: 1, a: 1};
+            this.unkTexColors[1] = { r: 1, g: 1, b: 1, a: 1};
+        }
+
         this.megaStateFlags.frontFace = GfxFrontFaceMode.CW;
         // this.megaStateFlags.cullMode = GfxCullMode.BACK;
         this.megaStateFlags.cullMode = GfxCullMode.NONE;
@@ -595,6 +656,11 @@ export class SlyMeshRenderer {
         });
 
         mat4.fromXRotation(this.modelMatrix, 3 * 90 * MathConstants.DEG_TO_RAD);
+
+        this.isSkybox = checkFlag(meshChunk.flags, Data.MeshFlag.Skybox);
+
+        if (this.isSkybox)
+            mat4.scale(this.modelMatrix, this.modelMatrix, [10, 10, 10]);
     }
 
     public prepareToRender(renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput) {
@@ -614,11 +680,20 @@ export class SlyMeshRenderer {
         }
         renderInst.setMegaStateFlags(this.megaStateFlags);
 
-        let offs = renderInst.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4*3);
+        // renderInst.sortKey = makeSortKeyOpaque(this.isSkybox ? GfxRendererLayer.BACKGROUND : GfxRendererLayer.OPAQUE, 0);
+
+        let offs = renderInst.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4*3 + 4);
         const d = renderInst.mapUniformBufferF32(SlyProgram.ub_ShapeParams);
-        computeViewMatrix(modelViewScratch, viewerInput.camera);
+
+        if (this.isSkybox)
+            computeViewMatrixSkybox(modelViewScratch, viewerInput.camera);
+        else
+            computeViewMatrix(modelViewScratch, viewerInput.camera);
+
         mat4.mul(modelViewScratch, modelViewScratch, this.modelMatrix);
+
         offs += fillMatrix4x3(d, offs, modelViewScratch);
+        offs += fillColor(d, offs, this.unkTexColors[0]);
         // offs += fillVec4v(d, offs, levelRenderData.lightDirection);
         // offs += fillVec4(d, offs, 1, 1, 0, 0);
         // offs += fillVec4(d, offs, 1, 1, 0, 0);
