@@ -5,7 +5,7 @@ import { GfxDevice, GfxRenderPass, GfxBindingLayoutDescriptor, GfxHostAccessPass
 import { preprocessProgramObj_GLSL, DefineMap } from "../gfx/shaderc/GfxShaderCompiler";
 import { GfxRenderHelper } from "../gfx/render/GfxRenderGraph";
 import { BasicRenderTarget, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderTargetHelpers";
-import { GfxRenderInstManager, GfxRendererLayer, makeSortKeyOpaque } from "../gfx/render/GfxRenderer";
+import { GfxRenderInstManager, GfxRendererLayer, makeSortKey, makeSortKeyOpaque } from "../gfx/render/GfxRenderer";
 import { fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v, fillColor } from "../gfx/helpers/UniformBufferHelpers";
 import { mat4, vec3, vec2, vec4 } from "gl-matrix";
 import { computeViewMatrix, CameraController, computeViewMatrixSkybox } from "../Camera";
@@ -46,7 +46,8 @@ layout(row_major, std140) uniform ub_SceneParams {
 
 layout(row_major, std140) uniform ub_ShapeParams {
     Mat4x3 u_BoneMatrix[1];
-    vec4 u_TextureColor;
+    vec4 u_TextureColor1;
+    vec4 u_TextureColor2;
 };
 
 // #define u_BaseDiffuse (u_Misc[0].x)
@@ -88,9 +89,11 @@ void main() {
 in vec2 v_TexCoord;
 in vec3 v_Normal;
 in vec3 v_VertexColor;
+in vec3 v_VertexColor2;
 
 void main() {
     vec2 t_TexCoord = v_TexCoord; // mod(v_TexCoord, vec2(1.0, 1.0));
+    // gl_FragColor = vec4(t_TexCoord, 0.0, 1.0); return;
 
 #if ENABLE_TEXTURES
     vec3 t_DiffuseMapColor = texture(u_DiffuseTexture, t_TexCoord.xy).rgb;
@@ -123,6 +126,9 @@ void main() {
     float tc1_w = 0.5;
 
     vec3 diffuseFinal = t_DiffuseMapColor * vertexColor * vertexLighting;
+#if ENABLE_TEXTURE_COLOR
+    diffuseFinal *= u_TextureColor1.rgb;
+#endif
 
 #if ENABLE_AMBIENT_LIGHTING
     vec3 lightDirection = normalize(vec3(0.1027, 0.02917, 0.267));
@@ -142,15 +148,15 @@ void main() {
     gl_FragColor.a *= inv_lit.w * 4.;
 
     // TODO: implement more properly
-    if (gl_FragColor.a == 0.0)
-        discard;
+    // if (gl_FragColor.a == 0.0)
+        // discard;
 
-    gl_FragColor.rgb = (ambientFinal * tc1_w + unkFinal) * 4.0; // * u_TextureColor.rgb;
+    gl_FragColor.rgb = (ambientFinal * tc1_w + unkFinal) * 4.0; // * u_TextureColor1.rgb;
 
-#if ENABLE_TEXTURE_COLOR
-    // gl_FragColor.rgb *= u_TextureColor.rgb;
-    gl_FragColor.rgb = u_TextureColor.rgb;
-#endif
+// #if ENABLE_TEXTURE_COLOR
+//     // gl_FragColor.rgb *= u_TextureColor1.rgb;
+//     gl_FragColor.rgb = u_TextureColor1.rgb;
+// #endif
 }
 `;
 
@@ -201,6 +207,8 @@ export class SlyRenderer implements Viewer.SceneGfx {
             for (let meshChunk of mesh.chunks) {
                 const geometryData = new GeometryData(device, gfxCache, meshChunk);
 
+                let isFullyOpaque = true;
+
                 let textureData: (TextureData | null)[] = nArray(3, () => null);
                 let textureEntry: (Data.TextureEntry | null) = null;
                 if (meshChunk.szme) {
@@ -220,11 +228,14 @@ export class SlyRenderer implements Viewer.SceneGfx {
                             // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Unk texID ${hexzero0x(texIndex)}`);
                             textureData[2] = new TextureData(device, gfxCache, textureUnk)
                         }
+
+                        isFullyOpaque = textureDiffuse.isFullyOpaque;
                     }
+
                     textureEntry = textureEntries[texIndex];
                 }
 
-                const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk, textureEntry);
+                const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk, textureEntry, isFullyOpaque);
                 meshRenderer.setVisible(isDefaultFlag(meshChunk.flags));
                 this.meshRenderers.push(meshRenderer);
             }
@@ -618,7 +629,7 @@ export class SlyMeshRenderer {
         this.visible = v;
     }
 
-    constructor(textureData: (TextureData | null)[], public geometryData: GeometryData, public meshChunk: Data.MeshChunk, textureEntry: (Data.TextureEntry | null)) {
+    constructor(textureData: (TextureData | null)[], public geometryData: GeometryData, public meshChunk: Data.MeshChunk, textureEntry: (Data.TextureEntry | null), private isFullyOpaque: boolean) {
         this.name = meshChunk.name;
 
         if (textureData[0]) {
@@ -680,9 +691,17 @@ export class SlyMeshRenderer {
         }
         renderInst.setMegaStateFlags(this.megaStateFlags);
 
-        // renderInst.sortKey = makeSortKeyOpaque(this.isSkybox ? GfxRendererLayer.BACKGROUND : GfxRendererLayer.OPAQUE, 0);
+        let rendererLayer: GfxRendererLayer;
+        if (this.isSkybox)
+            rendererLayer = GfxRendererLayer.BACKGROUND;
+        else if (this.isFullyOpaque)
+            rendererLayer = GfxRendererLayer.OPAQUE;
+        else
+            rendererLayer = GfxRendererLayer.TRANSLUCENT;
 
-        let offs = renderInst.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4*3 + 4);
+        renderInst.sortKey = makeSortKey(rendererLayer);
+
+        let offs = renderInst.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4*3 + 4 + 4);
         const d = renderInst.mapUniformBufferF32(SlyProgram.ub_ShapeParams);
 
         if (this.isSkybox)
@@ -694,6 +713,7 @@ export class SlyMeshRenderer {
 
         offs += fillMatrix4x3(d, offs, modelViewScratch);
         offs += fillColor(d, offs, this.unkTexColors[0]);
+        offs += fillColor(d, offs, this.unkTexColors[1]);
         // offs += fillVec4v(d, offs, levelRenderData.lightDirection);
         // offs += fillVec4(d, offs, 1, 1, 0, 0);
         // offs += fillVec4(d, offs, 1, 1, 0, 0);

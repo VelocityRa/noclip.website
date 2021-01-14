@@ -3,7 +3,7 @@ import { SceneGroup, SceneDesc, SceneGfx, ViewerRenderInput } from "../viewer";
 import * as Viewer from "../viewer";
 import { assert, hexzero, hexzero0x, spacePad } from '../util';
 import { downloadCanvasAsPng, downloadText } from "../DownloadUtils";
-import { range, range_end } from '../MathHelpers';
+import { clamp, range, range_end } from '../MathHelpers';
 import * as Settings from './SlyConstants';
 import { vec2, vec3, vec4, mat4, ReadonlyMat4, ReadonlyVec3 } from "gl-matrix";
 import { drawWorldSpaceAABB, getDebugOverlayCanvas2D, drawWorldSpacePoint } from "../DebugJunk";
@@ -27,6 +27,7 @@ export class DataStream {
 }
 
 interface CLUTMetaEntry {
+    unk0: number;
     colorCount: number;
     colorSize: number;
     offset: number; // Relative to start of color palette data
@@ -41,7 +42,7 @@ export function parseCLUTMetaEntries(stream: DataStream): CLUTMetaEntry[] {
         const colorCount = stream.readUint16();
         const colorSize = stream.readUint16();
         const offset = stream.readUint32();
-        entries.push({ colorCount, colorSize, offset });
+        entries.push({ unk0, colorCount, colorSize, offset });
     }
 
     return entries;
@@ -130,6 +131,9 @@ export class Texture {
     public texels_rgba: Uint8Array;
     public viewerTexture: Viewer.Texture[] = [];
 
+    // Calculated via a heuristic (check if texture palette contains non-opaque texels)
+    public isFullyOpaque = true;
+
     private static csm1ClutIndices = getCsm1ClutIndices();
     constructor(paletteBuf: ArrayBufferSlice, imageBuf: ArrayBufferSlice,
         public width: number, public height: number, colorCount: number, colorSize: number, public name: string = "N/A") {
@@ -139,11 +143,6 @@ export class Texture {
         let texels_slice = imageBuf.createTypedArray(Uint8Array);
         let palette_slice = paletteBuf.createTypedArray(Uint8Array);
 
-        // const x = i % width;
-        // const y = Math.floor(i / width);
-        // const inv_y = (-(y - (width / 2))) + width / 2 - 1;
-        // const offs = (inv_y * width + x) * 4;
-
         for (let i of range_end(0, width * height)) {
             const idx = Texture.csm1ClutIndices[texels_slice[i]] * 4;
             const offs = i * 4;
@@ -152,6 +151,13 @@ export class Texture {
             this.texels_rgba[offs + 1] = palette_slice[idx + 1];
             this.texels_rgba[offs + 2] = palette_slice[idx + 2];
             this.texels_rgba[offs + 3] = palette_slice[idx + 3];
+        }
+
+        for (let i = 0; i < this.texels_rgba.byteLength; i += 4) {
+            if (this.texels_rgba[i + 3] != 0x80) {
+                this.isFullyOpaque = false;
+                break;
+            }
         }
     }
 
@@ -163,11 +169,19 @@ export class Texture {
         canvas.height = height;
         canvas.title = this.name;
 
-        // todo: flip here?
+        // todo: flip?
+
+        // Shaders double the texture alpha, do that here too to get correct output in the viewer
+
+        const texelsDoubleAlpha = new ArrayBufferSlice(this.texels_rgba.buffer).copyToBuffer();
+        const texelsDoubleAlphaU8 = new ArrayBufferSlice(texelsDoubleAlpha).createTypedArray(Uint8Array)
+
+        for (let i = 0; i < texelsDoubleAlphaU8.byteLength; i += 4)
+            texelsDoubleAlphaU8[i + 3] = clamp(texelsDoubleAlphaU8[i + 3] * 2, 0x00, 0xFF);
 
         const ctx = canvas.getContext("2d")!;
         const imgData = ctx.createImageData(canvas.width, canvas.height);
-        imgData.data.set(this.texels_rgba);
+        imgData.data.set(texelsDoubleAlphaU8);
         ctx.putImageData(imgData, 0, 0);
         const surfaces = [canvas];
 
@@ -177,8 +191,7 @@ export class Texture {
         }
 
         const extraInfo = new Map<string, string>();
-        extraInfo.set('Format', 'IDTEX8-CSM1 (PS2)'); // todo: wrong
-
+        // extraInfo.set('Format', 'IDTEX8-CSM1 (PS2)'); // todo: wrong
 
         return { name: this.name, surfaces, extraInfo };
     }
@@ -362,6 +375,7 @@ export class Mesh {
 
             let flags = this.flags; // redundant
 
+            // These will be filled out later
             let szme: (SzmeChunk | undefined) = undefined;
             this.chunks.push({ positions, normals, texCoords, vertexColor, vertexColorFloats, trianglesIndices, unkIndices, szme, name, flags });
         }
