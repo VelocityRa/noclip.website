@@ -271,7 +271,7 @@ class Sly1LevelSceneDesc implements SceneDesc {
 
                             obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
                         }
-                        face_idx_base += chunk.positions.length;
+                        face_idx_base += chunk.positions.length / 3;
 
                         chunk_idx++;
                         chunk_total_idx++;
@@ -322,7 +322,7 @@ const sceneDescs = [
     new Sly1LevelSceneDesc("ms_approach", "A Rocky Start", 0xa63cc0),
     new Sly1LevelSceneDesc("ms_exterior", "Muggshot's Turf", 0x975ac0),
     new Sly1LevelSceneDesc("ms_casino", "Boneyard Casino", 0x7c29b0),
-    new Sly1LevelSceneDesc("ms_sniper", "Murray's Big Gamble", 0x660060),
+    new Sly1LevelSceneDesc("ms_sniper", "Murray's Big Gamble", 0x65F860),
     new Sly1LevelSceneDesc("ms_suv", "At the Dog Track", 0x794460),
     new Sly1LevelSceneDesc("ms_inspector", "Two to Tango", 0x851a60),
     new Sly1LevelSceneDesc("ms_vertigo", "Back Alley Heist", 0x67b570),
