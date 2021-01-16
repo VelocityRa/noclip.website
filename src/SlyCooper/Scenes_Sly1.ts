@@ -48,13 +48,13 @@ const pathBase = `Sly1`;
 function Uint8Array_indexOfMulti(arr: Uint8Array, searchElements: Uint8Array, fromIndex: number = 0): number {
     var index = arr.indexOf(searchElements[0], fromIndex);
 
-    if(searchElements.length === 1 || index === -1) {
+    if (searchElements.length === 1 || index === -1) {
         // Not found or no other elements to check
         return index;
     }
 
-    for(var i = index, j = 0; j < searchElements.length && i < arr.length; i++, j++) {
-        if(arr[i] !== searchElements[j]) {
+    for (var i = index, j = 0; j < searchElements.length && i < arr.length; i++, j++) {
+        if (arr[i] !== searchElements[j]) {
             return Uint8Array_indexOfMulti(arr, searchElements, index + 1);
         }
     }
@@ -202,7 +202,7 @@ class Sly1LevelSceneDesc implements SceneDesc {
         }
 
         // if (Settings.TEXTURES_SORT_BY_SIZE) {
-            // this.textures.sort((texA: Data.Texture, texB: Data.Texture) => (texA.width * texA.height > texB.width * texB.height) ? -1 : 1);
+        // this.textures.sort((texA: Data.Texture, texB: Data.Texture) => (texA.width * texA.height > texB.width * texB.height) ? -1 : 1);
         // }
 
         if (Settings.PARSE_MESHES) {
@@ -211,8 +211,8 @@ class Sly1LevelSceneDesc implements SceneDesc {
                 if (binView.getUint32(offset, true) === Data.Mesh.szmsMagic) {
                     try {
                         this.meshes.push(new Data.Mesh(bin, offset, index));
-                    ++index;
-                    } catch(e) {
+                        ++index;
+                    } catch (e) {
                         console.warn(`Error parsing mesh: ${e}`);
                     }
                 }
@@ -309,7 +309,7 @@ const sceneDescs = [
 
     "Tide of Terror (Isle of Wrath, Wales)",
     new Sly1LevelSceneDesc("uw_exterior_approach", "A Stealthy Approach", 0x93c640),
-    new Sly1LevelSceneDesc("uw_exterior_boat", "Prowling the Grounds", 0x007Ca240), // 0x007ca244),
+    new Sly1LevelSceneDesc("uw_exterior_boat", "Prowling the Grounds", 0x007Ca240),
     new Sly1LevelSceneDesc("uw_c2_final", "Into the Machine", 0x8b09c0),
     new Sly1LevelSceneDesc("uw_bonus_security", "High Class Heist", 0x64e6a0),
     new Sly1LevelSceneDesc("uw_bonus_drivewheels", "The Fire Down Below", 0x624b70),

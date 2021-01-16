@@ -329,24 +329,24 @@ export class SlyRenderer implements Viewer.SceneGfx {
         // }
 
         // for (let meshRenderer of this.meshRenderers) {
-            // let dbgPos = meshRenderer.meshChunk.positions;
-            // for (let i = 0; i < dbgPos.length; i += 3) {
-            //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
-            //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Magenta, 13);
-            // }
+        // let dbgPos = meshRenderer.meshChunk.positions;
+        // for (let i = 0; i < dbgPos.length; i += 3) {
+        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Magenta, 13);
+        // }
 
-            // if (meshRenderer.meshChunk.szme) {
-                // let orig = meshRenderer.meshChunk.szme?.origin;
-                // let dbgPos = vec3.fromValues(orig[0], orig[2], -orig[1]);
-                // drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, dbgPos, Green, 7);
+        // if (meshRenderer.meshChunk.szme) {
+        // let orig = meshRenderer.meshChunk.szme?.origin;
+        // let dbgPos = vec3.fromValues(orig[0], orig[2], -orig[1]);
+        // drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, dbgPos, Green, 7);
 
-                // dbgPos = meshRenderer.meshChunk.szme.positions;
-                // for (let i = 0; i < dbgPos.length; i += 3) {
-                //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
-                //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Cyan, 4);
+        // dbgPos = meshRenderer.meshChunk.szme.positions;
+        // for (let i = 0; i < dbgPos.length; i += 3) {
+        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Cyan, 4);
 
-                // }
-            // }
+        // }
+        // }
         // }
 
         return passRenderer;
@@ -533,14 +533,14 @@ export class GeometryData {
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: 0, bufferIndex: 0, format: GfxFormat.F32_RGB, bufferByteOffset: 0, }, // Position
             { location: 1, bufferIndex: 1, format: GfxFormat.F32_RGB, bufferByteOffset: 0, }, // Normal
-            { location: 2, bufferIndex: 2, format: GfxFormat.F32_RG,  bufferByteOffset: 0, }, // TexCoord
-            { location: 3, bufferIndex: 3, format: GfxFormat.F32_RGBA,bufferByteOffset: 0, }, // VertexColor
+            { location: 2, bufferIndex: 2, format: GfxFormat.F32_RG, bufferByteOffset: 0, }, // TexCoord
+            { location: 3, bufferIndex: 3, format: GfxFormat.F32_RGBA, bufferByteOffset: 0, }, // VertexColor
         ];
         const vertexBufferDescriptors: GfxInputLayoutBufferDescriptor[] = [
-            { byteStride: 3*0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
-            { byteStride: 3*0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
-            { byteStride: 2*0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
-            { byteStride: 4*0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
+            { byteStride: 3 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
+            { byteStride: 3 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
+            { byteStride: 2 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
+            { byteStride: 4 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
         ];
         this.inputLayout = cache.createInputLayout(device, {
             indexBufferFormat: GfxFormat.U16_R,
@@ -553,7 +553,7 @@ export class GeometryData {
             { buffer: this.texcoordBuffer, byteOffset: 0, },
             { buffer: this.vertexColorBuffer, byteOffset: 0, },
         ],
-        { buffer: this.indexBuffer, byteOffset: 0 });
+            { buffer: this.indexBuffer, byteOffset: 0 });
     }
 
     public destroy(device: GfxDevice): void {
@@ -652,8 +652,8 @@ export class SlyMeshRenderer {
             this.unkTexColors[0] = uintToGfxColor(textureEntry?.unkCol1);
             this.unkTexColors[1] = uintToGfxColor(textureEntry?.unkCol2);
         } else {
-            this.unkTexColors[0] = { r: 1, g: 1, b: 1, a: 1};
-            this.unkTexColors[1] = { r: 1, g: 1, b: 1, a: 1};
+            this.unkTexColors[0] = { r: 1, g: 1, b: 1, a: 1 };
+            this.unkTexColors[1] = { r: 1, g: 1, b: 1, a: 1 };
         }
 
         this.megaStateFlags.frontFace = GfxFrontFaceMode.CW;
@@ -701,7 +701,7 @@ export class SlyMeshRenderer {
 
         renderInst.sortKey = makeSortKey(rendererLayer);
 
-        let offs = renderInst.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4*3 + 4 + 4);
+        let offs = renderInst.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 3 + 4 + 4);
         const d = renderInst.mapUniformBufferF32(SlyProgram.ub_ShapeParams);
 
         if (this.isSkybox)
