@@ -480,7 +480,7 @@ export class Mesh {
                         // unkIndicesFloats[i * 4 + 2] = stream.readUint8() / 255;
                         // unkIndicesFloats[i * 4 + 3] = stream.readUint8() / 255;
                         // if (szmeChunkIndex == 0)
-                            // console.log(`AT ${hexzero0x(stream.offs-4)} is [${lightingFloats[i * 4 + 0]}, ${lightingFloats[i * 4 + 1]}, ${lightingFloats[i * 4 + 2]}, ${lightingFloats[i * 4 + 3]},]`);
+                        // console.log(`AT ${hexzero0x(stream.offs-4)} is [${lightingFloats[i * 4 + 0]}, ${lightingFloats[i * 4 + 1]}, ${lightingFloats[i * 4 + 2]}, ${lightingFloats[i * 4 + 3]},]`);
                     }
 
                     let texIndex = stream.readUint16();
