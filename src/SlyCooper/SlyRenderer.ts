@@ -45,7 +45,7 @@ layout(row_major, std140) uniform ub_SceneParams {
 };
 
 layout(row_major, std140) uniform ub_ShapeParams {
-    Mat4x3 u_BoneMatrix[1];
+    Mat4x4 u_BoneMatrix[1];
     vec4 u_TextureColor1;
     vec4 u_TextureColor2;
 };
@@ -75,7 +75,7 @@ out vec2 v_TexCoord;
 out vec3 v_VertexColor;
 
 void main() {
-    gl_Position = Mul(u_Projection, Mul(_Mat4x4(u_BoneMatrix[0]), vec4(a_Position, 1.0)));
+    gl_Position = Mul(u_Projection, Mul(u_BoneMatrix[0], vec4(a_Position, 1.0)));
     v_Normal = normalize(vec4(a_Normal, 0.0).xyz);
 
     // gl_Position = Mul(u_Projection, vec4(a_Position, 1.0));
@@ -178,8 +178,6 @@ const bindingLayouts: GfxBindingLayoutDescriptor[] = [
     { numUniformBuffers: 2, numSamplers: 3, },
 ];
 
-const modelViewScratch = mat4.create();
-
 export class SlyRenderer implements Viewer.SceneGfx {
     public textureHolder = new FakeTextureHolder([]);
 
@@ -198,49 +196,59 @@ export class SlyRenderer implements Viewer.SceneGfx {
         this.program = preprocessProgramObj_GLSL(device, new SlyProgram(this.renderHacks));
     }
 
-    constructor(device: GfxDevice, meshes: Data.Mesh[], texturesDiffuse: (Data.Texture | null)[], texturesAmbient: (Data.Texture | null)[], texturesUnk: (Data.Texture | null)[], textureEntries: Data.TextureEntry[]) {
+    constructor(device: GfxDevice, meshContainers: Data.MeshContainer[], texturesDiffuse: (Data.Texture | null)[], texturesAmbient: (Data.Texture | null)[], texturesUnk: (Data.Texture | null)[], textureEntries: Data.TextureEntry[]) {
         this.renderHelper = new GfxRenderHelper(device);
 
         const gfxCache = this.renderHelper.getCache();
 
-        for (let mesh of meshes) {
-            for (let meshChunk of mesh.chunks) {
-                const geometryData = new GeometryData(device, gfxCache, meshChunk);
+        let identMat4 = mat4.create();
+        mat4.identity(identMat4)
 
-                let isFullyOpaque = true;
+        for (let meshContainer of meshContainers) {
+            for (let mesh of meshContainer.meshes) {
+                let instanceMatrices: mat4[] = [ identMat4 ];
 
-                let textureData: (TextureData | null)[] = nArray(3, () => null);
-                let textureEntry: (Data.TextureEntry | null) = null;
-                if (meshChunk.szme) {
-                    const texIndex = meshChunk.szme.texIndex;
-                    const textureDiffuse = texturesDiffuse[texIndex];
-                    if (textureDiffuse) {
-                        // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Diffuse texID ${hexzero0x(texIndex)}`);
-                        textureData[0] = new TextureData(device, gfxCache, textureDiffuse)
+                for (let instance of mesh.instances)
+                    instanceMatrices.push(instance.instanceMatrix);
 
-                        const textureAmbient = texturesAmbient[texIndex];
-                        if (textureAmbient) {
-                            // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Ambient texID ${hexzero0x(texIndex)}`);
-                            textureData[1] = new TextureData(device, gfxCache, textureAmbient)
+                for (let meshChunk of mesh.chunks) {
+                    const geometryData = new GeometryData(device, gfxCache, meshChunk);
+
+                    let isFullyOpaque = true;
+
+                    let textureData: (TextureData | null)[] = nArray(3, () => null);
+                    let textureEntry: (Data.TextureEntry | null) = null;
+                    if (meshChunk.szme) {
+                        const texIndex = meshChunk.szme.texIndex;
+                        const textureDiffuse = texturesDiffuse[texIndex];
+                        if (textureDiffuse) {
+                            // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Diffuse texID ${hexzero0x(texIndex)}`);
+                            textureData[0] = new TextureData(device, gfxCache, textureDiffuse)
+
+                            const textureAmbient = texturesAmbient[texIndex];
+                            if (textureAmbient) {
+                                // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Ambient texID ${hexzero0x(texIndex)}`);
+                                textureData[1] = new TextureData(device, gfxCache, textureAmbient)
+                            }
+                            const textureUnk = texturesUnk[texIndex];
+                            if (textureUnk) {
+                                // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Unk texID ${hexzero0x(texIndex)}`);
+                                textureData[2] = new TextureData(device, gfxCache, textureUnk)
+                            }
+
+                            isFullyOpaque = textureDiffuse.isFullyOpaque;
                         }
-                        const textureUnk = texturesUnk[texIndex];
-                        if (textureUnk) {
-                            // console.log(`mesh at ${hexzero0x(mesh.offset)} gets Unk texID ${hexzero0x(texIndex)}`);
-                            textureData[2] = new TextureData(device, gfxCache, textureUnk)
-                        }
 
-                        isFullyOpaque = textureDiffuse.isFullyOpaque;
+                        textureEntry = textureEntries[texIndex];
                     }
 
-                    textureEntry = textureEntries[texIndex];
+                    const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk, textureEntry, isFullyOpaque, instanceMatrices);
+                    meshRenderer.setVisible(isDefaultFlag(meshChunk.flags));
+                    this.meshRenderers.push(meshRenderer);
                 }
-
-                const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk, textureEntry, isFullyOpaque);
-                meshRenderer.setVisible(isDefaultFlag(meshChunk.flags));
-                this.meshRenderers.push(meshRenderer);
             }
+            // this.meshRenderersReverse = this.meshRenderers.slice().reverse();
         }
-        // this.meshRenderersReverse = this.meshRenderers.slice().reverse();
     }
 
     public prepareToRender(device: GfxDevice, hostAccessPass: GfxHostAccessPass, viewerInput: Viewer.ViewerRenderInput, renderInstManager: GfxRenderInstManager) {
@@ -610,8 +618,11 @@ function uintToGfxColor(col: number): GfxColor {
     return { r, g, b, a };
 }
 
+const modelViewScratch = mat4.create();
+const modelViewScratch2 = mat4.create();
+const modelViewScratch3 = mat4.create();
+
 export class SlyMeshRenderer {
-    public modelMatrix = mat4.create();
     public textureMatrix = mat4.create();
 
     private textureMappingDiffuse: (TextureMapping | null);
@@ -629,7 +640,16 @@ export class SlyMeshRenderer {
         this.visible = v;
     }
 
-    constructor(textureData: (TextureData | null)[], public geometryData: GeometryData, public meshChunk: Data.MeshChunk, textureEntry: (Data.TextureEntry | null), private isFullyOpaque: boolean) {
+    private rotX: mat4 = mat4.create();
+
+    constructor(
+        textureData: (TextureData | null)[],
+        public geometryData: GeometryData,
+        public meshChunk: Data.MeshChunk,
+        textureEntry: (Data.TextureEntry | null),
+        private isFullyOpaque: boolean,
+        private instanceMatrices: mat4[]) {
+
         this.name = meshChunk.name;
 
         if (textureData[0]) {
@@ -666,20 +686,32 @@ export class SlyMeshRenderer {
             blendDstFactor: GfxBlendFactor.ONE_MINUS_SRC_ALPHA,
         });
 
-        mat4.fromXRotation(this.modelMatrix, 3 * 90 * MathConstants.DEG_TO_RAD);
+        this.rotX = mat4.fromXRotation(this.rotX, 3 * 90 * MathConstants.DEG_TO_RAD);
 
         this.isSkybox = checkFlag(meshChunk.flags, Data.MeshFlag.Skybox);
-
-        if (this.isSkybox)
-            mat4.scale(this.modelMatrix, this.modelMatrix, [10, 10, 10]);
     }
 
     public prepareToRender(renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput) {
-        if (!this.visible)
-            return;
+        // if (!this.visible)
+            // return;
 
-        const renderInst = renderInstManager.newRenderInst();
-        renderInst.setInputLayoutAndState(this.geometryData.inputLayout, this.geometryData.inputState);
+        // if (Math.abs(this.instanceMatrices[2][0] - - 0.9581351) > 0.0001)
+        //     return;
+        // debugger;
+
+        let ayy = false;
+        for (let instanceMatrix of this.instanceMatrices) {
+            if (Math.abs(instanceMatrix[0] - - 0.9581351) < 0.0001) {
+                ayy = true;
+            }
+        }
+        if (!ayy)
+            return;
+        // debugger;
+
+        const template = renderInstManager.pushTemplateRenderInst();
+
+        template.setInputLayoutAndState(this.geometryData.inputLayout, this.geometryData.inputState);
         if (this.textureMappingDiffuse) {
             // todo: is scratch/copy necessary? ask jasper
             textureMappingScratch[0].copy(this.textureMappingDiffuse);
@@ -687,9 +719,9 @@ export class SlyMeshRenderer {
                 textureMappingScratch[1].copy(this.textureMappingAmbient);
             if (this.textureMappingUnk)
                 textureMappingScratch[2].copy(this.textureMappingUnk);
-            renderInst.setSamplerBindingsFromTextureMappings(textureMappingScratch);
+            template.setSamplerBindingsFromTextureMappings(textureMappingScratch);
         }
-        renderInst.setMegaStateFlags(this.megaStateFlags);
+        template.setMegaStateFlags(this.megaStateFlags);
 
         let rendererLayer: GfxRendererLayer;
         if (this.isSkybox)
@@ -699,28 +731,44 @@ export class SlyMeshRenderer {
         else
             rendererLayer = GfxRendererLayer.TRANSLUCENT;
 
-        renderInst.sortKey = makeSortKey(rendererLayer);
-
-        let offs = renderInst.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 3 + 4 + 4);
-        const d = renderInst.mapUniformBufferF32(SlyProgram.ub_ShapeParams);
+        template.sortKey = makeSortKey(rendererLayer);
 
         if (this.isSkybox)
             computeViewMatrixSkybox(modelViewScratch, viewerInput.camera);
         else
             computeViewMatrix(modelViewScratch, viewerInput.camera);
 
-        mat4.mul(modelViewScratch, modelViewScratch, this.modelMatrix);
+        // TODO: instanced rendering
 
-        offs += fillMatrix4x3(d, offs, modelViewScratch);
-        offs += fillColor(d, offs, this.unkTexColors[0]);
-        offs += fillColor(d, offs, this.unkTexColors[1]);
-        // offs += fillVec4v(d, offs, levelRenderData.lightDirection);
-        // offs += fillVec4(d, offs, 1, 1, 0, 0);
-        // offs += fillVec4(d, offs, 1, 1, 0, 0);
-        // offs += fillVec4v(d, offs, levelRenderData.shadowTexScaleBias);
-        // offs += fillVec4(d, offs, levelRenderData.baseDiffuse, levelRenderData.baseAmbient, 0, 0);
+        for (let instanceMatrix of this.instanceMatrices) {
+            if (Math.abs(instanceMatrix[0] - - 0.9581351) < 0.0001) {
+                debugger;
+            }
 
-        renderInst.drawIndexes(this.geometryData.indexCount);
-        renderInstManager.submitRenderInst(renderInst);
+            const renderInstInstance = renderInstManager.newRenderInst();
+
+            let offs = renderInstInstance.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 4 + 4 + 4);
+            const d = renderInstInstance.mapUniformBufferF32(SlyProgram.ub_ShapeParams);
+
+            mat4.copy(modelViewScratch2, modelViewScratch);
+
+            mat4.mul(modelViewScratch2, modelViewScratch2, instanceMatrix);
+            mat4.mul(modelViewScratch2, modelViewScratch2, this.rotX);
+
+            if (this.isSkybox)
+                mat4.scale(modelViewScratch2, modelViewScratch2, [10, 10, 10]);
+
+            console.log(modelViewScratch2);
+            offs += fillMatrix4x4(d, offs, modelViewScratch2);
+            offs += fillColor(d, offs, this.unkTexColors[0]);
+            offs += fillColor(d, offs, this.unkTexColors[1]);
+
+            renderInstInstance.drawIndexes(this.geometryData.indexCount);
+            renderInstManager.submitRenderInst(renderInstInstance);
+
+            // break;
+        }
+
+        renderInstManager.popTemplateRenderInst();
     }
 }

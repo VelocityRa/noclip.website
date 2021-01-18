@@ -63,7 +63,7 @@ function Uint8Array_indexOfMulti(arr: Uint8Array, searchElements: Uint8Array, fr
 };
 
 class Sly1LevelSceneDesc implements SceneDesc {
-    private meshes: Data.Mesh[] = [];
+    private meshContainers: Data.MeshContainer[] = [];
     private texturesDiffuse: (Data.Texture | null)[] = [];
     private texturesAmbient: (Data.Texture | null)[] = [];
     private texturesUnk: (Data.Texture | null)[] = [];
@@ -75,7 +75,6 @@ class Sly1LevelSceneDesc implements SceneDesc {
         // TODO? Use compressed original files (orig. or zip/etc), or decompressed trimmed files
 
         const bin = await context.dataFetcher.fetchData(`${pathBase}/${this.id}_W.dec`)
-        const binView = bin.createDataView();
 
         console.log(`loaded ${pathBase}/${this.id}_W.dec of size ${bin.byteLength}`);
 
@@ -206,19 +205,9 @@ class Sly1LevelSceneDesc implements SceneDesc {
         // }
 
         if (Settings.PARSE_MESHES) {
-            let index = 0;
-            for (let offset = 0; offset < bin.byteLength - 4; ++offset) {
-                if (binView.getUint32(offset, true) === Data.Mesh.szmsMagic) {
-                    try {
-                        this.meshes.push(new Data.Mesh(bin, offset, index));
-                        ++index;
-                    } catch (e) {
-                        console.warn(`Error parsing mesh: ${e}`);
-                    }
-                }
-            }
+            this.meshContainers = Data.parseMeshes(bin);
 
-            console.log(`Mesh #: ${this.meshes.length}`);
+            console.log(`Mesh Container #: ${this.meshContainers.length}`);
 
             // export to .obj
 
@@ -229,62 +218,64 @@ class Sly1LevelSceneDesc implements SceneDesc {
 
                 let mesh_idx = 0;
                 let chunk_total_idx = 0;
-                for (let mesh of this.meshes) {
-                    if (!Settings.SEPARATE_OBJECT_SUBMESHES) {
-                        obj_str += `o ${mesh.index}_${hexzero0x(mesh.offset)}\n`;
+                for (let meshContainer of this.meshContainers) {
+                    for (let mesh of meshContainer.meshes) {
+                        if (!Settings.SEPARATE_OBJECT_SUBMESHES) {
+                            obj_str += `o ${mesh.container.containerIndex}_${mesh.meshIndex}_${chunk_total_idx}_${hexzero0x(mesh.offset)}\n`;
+                        }
+
+                        let chunk_idx = 0;
+                        for (let chunk of mesh.chunks) {
+                            if (Settings.SEPARATE_OBJECT_SUBMESHES) {
+                                obj_str += `o ${mesh.container.containerIndex}_${mesh.meshIndex}_${chunk_idx}_${chunk_total_idx}_${hexzero0x(mesh.offset)}\n`;
+                            } else {
+                                obj_str += `g ${mesh.container.containerIndex}_${mesh.meshIndex}_${chunk_idx}_${chunk_total_idx}_${hexzero0x(mesh.offset)}\n`;
+                            }
+
+                            for (let i = 0; i < chunk.positions.length; i += 3) {
+                                let scaled_pos = vec3.fromValues(
+                                    chunk.positions[i] * Settings.MESH_SCALE,
+                                    chunk.positions[i + 1] * Settings.MESH_SCALE,
+                                    chunk.positions[i + 2] * Settings.MESH_SCALE);
+
+                                obj_str += `v ${scaled_pos[0]} ${scaled_pos[1]} ${scaled_pos[2]}\n`;
+                            }
+
+                            for (let i = 0; i < chunk.normals.length; i += 3) {
+                                let normal = vec3.fromValues(chunk.normals[i], chunk.normals[i + 1], chunk.normals[i + 2]);
+
+                                obj_str += `vn ${normal[0]} ${normal[1]} ${normal[2]}\n`;
+                            }
+
+                            for (let i = 0; i < chunk.texCoords.length; i += 2) {
+                                let texCoord = vec2.fromValues(chunk.texCoords[i], chunk.texCoords[i + 1]);
+
+                                obj_str += `vt ${texCoord[0]} ${texCoord[1]}\n`;
+                            }
+
+                            obj_str += `s off\n`;
+                            for (let i = 0; i < chunk.trianglesIndices.length; i += 3) {
+                                const f0 = face_idx_base + chunk.trianglesIndices[i + 0];
+                                const f1 = face_idx_base + chunk.trianglesIndices[i + 1];
+                                const f2 = face_idx_base + chunk.trianglesIndices[i + 2];
+
+                                obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
+                            }
+                            face_idx_base += chunk.positions.length / 3;
+
+                            chunk_idx++;
+                            chunk_total_idx++;
+                        }
+                        chunk_idx = 0;
+                        mesh_idx++;
                     }
 
-                    let chunk_idx = 0;
-                    for (let chunk of mesh.chunks) {
-                        if (Settings.SEPARATE_OBJECT_SUBMESHES) {
-                            obj_str += `o ${mesh_idx}-${chunk_idx}_${chunk_total_idx}_${hexzero0x(mesh.offset)}\n`;
-                        } else {
-                            obj_str += `g ${mesh.index}_${hexzero0x(mesh.offset)}_${chunk_idx}\n`;
-                        }
-
-                        for (let i = 0; i < chunk.positions.length; i += 3) {
-                            let scaled_pos = vec3.fromValues(
-                                chunk.positions[i] * Settings.MESH_SCALE,
-                                chunk.positions[i + 1] * Settings.MESH_SCALE,
-                                chunk.positions[i + 2] * Settings.MESH_SCALE);
-
-                            obj_str += `v ${scaled_pos[0]} ${scaled_pos[1]} ${scaled_pos[2]}\n`;
-                        }
-
-                        for (let i = 0; i < chunk.normals.length; i += 3) {
-                            let normal = vec3.fromValues(chunk.normals[i], chunk.normals[i + 1], chunk.normals[i + 2]);
-
-                            obj_str += `vn ${normal[0]} ${normal[1]} ${normal[2]}\n`;
-                        }
-
-                        for (let i = 0; i < chunk.texCoords.length; i += 2) {
-                            let texCoord = vec2.fromValues(chunk.texCoords[i], chunk.texCoords[i + 1]);
-
-                            obj_str += `vt ${texCoord[0]} ${texCoord[1]}\n`;
-                        }
-
-                        obj_str += `s off\n`;
-                        for (let i = 0; i < chunk.trianglesIndices.length; i += 3) {
-                            const f0 = face_idx_base + chunk.trianglesIndices[i + 0];
-                            const f1 = face_idx_base + chunk.trianglesIndices[i + 1];
-                            const f2 = face_idx_base + chunk.trianglesIndices[i + 2];
-
-                            obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
-                        }
-                        face_idx_base += chunk.positions.length / 3;
-
-                        chunk_idx++;
-                        chunk_total_idx++;
-                    }
-                    chunk_idx = 0;
-                    mesh_idx++;
+                    downloadText(`${this.id}.obj`, obj_str);
                 }
-
-                downloadText(`${this.id}.obj`, obj_str);
             }
         }
 
-        const renderer = new SlyRenderer(device, this.meshes, this.texturesDiffuse, this.texturesAmbient, this.texturesUnk, textureEntries);
+        const renderer = new SlyRenderer(device, this.meshContainers, this.texturesDiffuse, this.texturesAmbient, this.texturesUnk, textureEntries);
 
         let addTexToViewer = async (tex: (Data.Texture | null)) => {
             if (tex)
