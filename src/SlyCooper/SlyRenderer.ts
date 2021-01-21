@@ -6,7 +6,7 @@ import { preprocessProgramObj_GLSL, DefineMap } from "../gfx/shaderc/GfxShaderCo
 import { GfxRenderHelper } from "../gfx/render/GfxRenderGraph";
 import { BasicRenderTarget, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderTargetHelpers";
 import { GfxRenderInstManager, GfxRendererLayer, makeSortKey, makeSortKeyOpaque } from "../gfx/render/GfxRenderer";
-import { fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v, fillColor } from "../gfx/helpers/UniformBufferHelpers";
+import { fillVec2v, fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v, fillColor } from "../gfx/helpers/UniformBufferHelpers";
 import { mat4, vec3, vec2, vec4 } from "gl-matrix";
 import { computeViewMatrix, CameraController, computeViewMatrixSkybox } from "../Camera";
 import { nArray, assertExists, hexzero0x, hexzero, binzero, binzero0b } from "../util";
@@ -27,6 +27,7 @@ class SlyRenderHacks {
     disableVertexColors = false;
     disableAmbientLighting = true;
     disableTextureColor = true;
+    disableMeshInstances = false;
 }
 
 class SlyDebugHacks {
@@ -35,6 +36,9 @@ class SlyDebugHacks {
     drawSzmePositions = false;
 }
 
+let renderHacks = new SlyRenderHacks();
+let debugHacks = new SlyDebugHacks();
+
 class SlyProgram {
     public static ub_SceneParams = 0;
     public static ub_ShapeParams = 1;
@@ -42,12 +46,14 @@ class SlyProgram {
     public both = `
 layout(row_major, std140) uniform ub_SceneParams {
     Mat4x4 u_Projection;
+    float u_Time;
 };
 
 layout(row_major, std140) uniform ub_ShapeParams {
     Mat4x4 u_BoneMatrix[1];
     vec4 u_TextureColor1;
     vec4 u_TextureColor2;
+    vec2 u_TexOffset;
 };
 
 // #define u_BaseDiffuse (u_Misc[0].x)
@@ -92,7 +98,8 @@ in vec3 v_VertexColor;
 in vec3 v_VertexColor2;
 
 void main() {
-    vec2 t_TexCoord = v_TexCoord; // mod(v_TexCoord, vec2(1.0, 1.0));
+    vec2 t_TexCoord = mod(v_TexCoord + u_TexOffset, vec2(1.0));
+    // vec2 t_TexCoord = v_TexCoord;
     // gl_FragColor = vec4(t_TexCoord, 0.0, 1.0); return;
 
 #if ENABLE_TEXTURES
@@ -188,12 +195,10 @@ export class SlyRenderer implements Viewer.SceneGfx {
     private meshRenderers: SlyMeshRenderer[] = [];
     private meshRenderersReverse: SlyMeshRenderer[] = [];
 
-    private renderHacks: SlyRenderHacks = new SlyRenderHacks();
-    private debugHacks: SlyDebugHacks = new SlyDebugHacks();
     private flagLayers: FlagLayer[] = [];
 
     private createShader(device: GfxDevice) {
-        this.program = preprocessProgramObj_GLSL(device, new SlyProgram(this.renderHacks));
+        this.program = preprocessProgramObj_GLSL(device, new SlyProgram(renderHacks));
     }
 
     constructor(device: GfxDevice, meshContainers: Data.MeshContainer[], texturesDiffuse: (Data.Texture | null)[], texturesAmbient: (Data.Texture | null)[], texturesUnk: (Data.Texture | null)[], textureEntries: Data.TextureEntry[]) {
@@ -260,9 +265,10 @@ export class SlyRenderer implements Viewer.SceneGfx {
         const gfxProgram = renderInstManager.gfxRenderCache.createProgramSimple(device, this.program!);
         template.setGfxProgram(gfxProgram);
 
-        let offs = template.allocateUniformBuffer(SlyProgram.ub_SceneParams, 16);
+        let offs = template.allocateUniformBuffer(SlyProgram.ub_SceneParams, 16 + 1);
         const d = template.mapUniformBufferF32(SlyProgram.ub_SceneParams);
         offs += fillMatrix4x4(d, offs, viewerInput.camera.projectionMatrix);
+        d[offs++] = viewerInput.time / 10000.0;
 
         for (let meshRenderer of this.meshRenderers) {
             meshRenderer.prepareToRender(renderInstManager, viewerInput);
@@ -288,11 +294,11 @@ export class SlyRenderer implements Viewer.SceneGfx {
         renderInstManager.drawOnPassRenderer(device, passRenderer);
         renderInstManager.resetRenderInsts();
 
-        if (this.debugHacks.drawMeshOrigins || this.debugHacks.drawSzmsPositions || this.debugHacks.drawSzmePositions) {
+        if (debugHacks.drawMeshOrigins || debugHacks.drawSzmsPositions || debugHacks.drawSzmePositions) {
             const ctx = getDebugOverlayCanvas2D();
 
             for (let meshRenderer of this.meshRenderers) {
-                if (this.debugHacks.drawSzmsPositions) {
+                if (debugHacks.drawSzmsPositions) {
                     let posVec = meshRenderer.meshChunk.positions;
                     for (let i = 0; i < posVec.length; i += 3) {
                         const p = vec3.fromValues(posVec[i + 0], posVec[i + 2], -posVec[i + 1]);
@@ -301,13 +307,13 @@ export class SlyRenderer implements Viewer.SceneGfx {
                 }
 
                 if (meshRenderer.meshChunk.szme) {
-                    if (this.debugHacks.drawMeshOrigins) {
+                    if (debugHacks.drawMeshOrigins) {
                         let origin = meshRenderer.meshChunk.szme?.origin;
                         let originVec = vec3.fromValues(origin[0], origin[2], -origin[1]);
                         drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, originVec, Green, 9);
                     }
 
-                    if (this.debugHacks.drawSzmePositions) {
+                    if (debugHacks.drawSzmePositions) {
                         let posVec = meshRenderer.meshChunk.szme.positions;
                         for (let i = 0; i < posVec.length; i += 3) {
                             const p = vec3.fromValues(posVec[i + 0], posVec[i + 2], -posVec[i + 1]);
@@ -361,22 +367,27 @@ export class SlyRenderer implements Viewer.SceneGfx {
     }
 
     private setTexturesEnabled(enabled: boolean) {
-        this.renderHacks.disableTextures = !enabled;
+        renderHacks.disableTextures = !enabled;
         this.program = null;
     }
 
     private setVertexColorsEnabled(enabled: boolean) {
-        this.renderHacks.disableVertexColors = !enabled;
+        renderHacks.disableVertexColors = !enabled;
         this.program = null;
     }
 
     private setAmbientLightingEnabled(enabled: boolean) {
-        this.renderHacks.disableAmbientLighting = !enabled;
+        renderHacks.disableAmbientLighting = !enabled;
         this.program = null;
     }
 
     private setTextureColorEnabled(enabled: boolean) {
-        this.renderHacks.disableTextureColor = !enabled;
+        renderHacks.disableTextureColor = !enabled;
+        this.program = null;
+    }
+
+    private setMeshInstancesEnabled(enabled: boolean) {
+        renderHacks.disableMeshInstances = !enabled;
         this.program = null;
     }
 
@@ -387,29 +398,35 @@ export class SlyRenderer implements Viewer.SceneGfx {
         renderHacksPanel.customHeaderBackgroundColor = UI.COOL_BLUE_COLOR;
         renderHacksPanel.setTitle(UI.RENDER_HACKS_ICON, 'Render Hacks');
 
-        const enableVertexColorsCheckbox = new UI.Checkbox('Enable Vertex Colors', !this.renderHacks.disableVertexColors);
+        const enableVertexColorsCheckbox = new UI.Checkbox('Enable Vertex Colors', !renderHacks.disableVertexColors);
         enableVertexColorsCheckbox.onchanged = () => {
             this.setVertexColorsEnabled(enableVertexColorsCheckbox.checked);
         };
         renderHacksPanel.contents.appendChild(enableVertexColorsCheckbox.elem);
 
-        const enableTextures = new UI.Checkbox('Enable Textures', !this.renderHacks.disableTextures);
+        const enableTextures = new UI.Checkbox('Enable Textures', !renderHacks.disableTextures);
         enableTextures.onchanged = () => {
             this.setTexturesEnabled(enableTextures.checked);
         };
         renderHacksPanel.contents.appendChild(enableTextures.elem);
 
-        const enableAmbientLighting = new UI.Checkbox('Enable Ambient Lighting', !this.renderHacks.disableAmbientLighting);
+        const enableAmbientLighting = new UI.Checkbox('Enable Ambient Lighting', !renderHacks.disableAmbientLighting);
         enableAmbientLighting.onchanged = () => {
             this.setAmbientLightingEnabled(enableAmbientLighting.checked);
         };
         renderHacksPanel.contents.appendChild(enableAmbientLighting.elem);
 
-        const enableTextureColor = new UI.Checkbox('Enable Texture Color', !this.renderHacks.disableTextureColor);
+        const enableTextureColor = new UI.Checkbox('Enable Texture Color', !renderHacks.disableTextureColor);
         enableTextureColor.onchanged = () => {
             this.setTextureColorEnabled(enableTextureColor.checked);
         };
         renderHacksPanel.contents.appendChild(enableTextureColor.elem);
+
+        const enableMeshInstances = new UI.Checkbox('Enable Mesh Instances', !renderHacks.disableMeshInstances);
+        enableMeshInstances.onchanged = () => {
+            this.setMeshInstancesEnabled(enableMeshInstances.checked);
+        };
+        renderHacksPanel.contents.appendChild(enableMeshInstances.elem);
 
         panels.push(renderHacksPanel);
 
@@ -418,17 +435,17 @@ export class SlyRenderer implements Viewer.SceneGfx {
         debugPanel.setTitle(UI.RENDER_HACKS_ICON, 'Debugging Hacks');
         const drawMeshOriginsCheckbox = new UI.Checkbox('Draw Mesh Origins', false);
         drawMeshOriginsCheckbox.onchanged = () => {
-            this.debugHacks.drawMeshOrigins = drawMeshOriginsCheckbox.checked;
+            debugHacks.drawMeshOrigins = drawMeshOriginsCheckbox.checked;
         };
         debugPanel.contents.appendChild(drawMeshOriginsCheckbox.elem);
         const drawSzmsPositionsCheckbox = new UI.Checkbox('Draw SZMS Positions', false);
         drawSzmsPositionsCheckbox.onchanged = () => {
-            this.debugHacks.drawSzmsPositions = drawSzmsPositionsCheckbox.checked;
+            debugHacks.drawSzmsPositions = drawSzmsPositionsCheckbox.checked;
         };
         debugPanel.contents.appendChild(drawSzmsPositionsCheckbox.elem);
         const drawSzmePositionsCheckbox = new UI.Checkbox('Draw SZME Positions', false);
         drawSzmePositionsCheckbox.onchanged = () => {
-            this.debugHacks.drawSzmePositions = drawSzmePositionsCheckbox.checked;
+            debugHacks.drawSzmePositions = drawSzmePositionsCheckbox.checked;
         };
         debugPanel.contents.appendChild(drawSzmePositionsCheckbox.elem);
         panels.push(debugPanel);
@@ -618,9 +635,8 @@ function uintToGfxColor(col: number): GfxColor {
     return { r, g, b, a };
 }
 
-const modelViewScratch = mat4.create();
-const modelViewScratch2 = mat4.create();
-const modelViewScratch3 = mat4.create();
+const viewMatScratch = mat4.create();
+const modelViewMatScratch = mat4.create();
 
 export class SlyMeshRenderer {
     public textureMatrix = mat4.create();
@@ -692,22 +708,8 @@ export class SlyMeshRenderer {
     }
 
     public prepareToRender(renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput) {
-        // if (!this.visible)
-            // return;
-
-        // if (Math.abs(this.instanceMatrices[2][0] - - 0.9581351) > 0.0001)
-        //     return;
-        // debugger;
-
-        let ayy = false;
-        for (let instanceMatrix of this.instanceMatrices) {
-            if (Math.abs(instanceMatrix[0] - - 0.9581351) < 0.0001) {
-                ayy = true;
-            }
-        }
-        if (!ayy)
+        if (!this.visible)
             return;
-        // debugger;
 
         const template = renderInstManager.pushTemplateRenderInst();
 
@@ -734,39 +736,42 @@ export class SlyMeshRenderer {
         template.sortKey = makeSortKey(rendererLayer);
 
         if (this.isSkybox)
-            computeViewMatrixSkybox(modelViewScratch, viewerInput.camera);
+            computeViewMatrixSkybox(viewMatScratch, viewerInput.camera);
         else
-            computeViewMatrix(modelViewScratch, viewerInput.camera);
+            computeViewMatrix(viewMatScratch, viewerInput.camera);
+
+
+        let texOffset = vec2.create();
+
+        // if (!this.isSkybox)
+        //     texOffset[1] = viewerInput.time / 10000.0;
 
         // TODO: instanced rendering
 
         for (let instanceMatrix of this.instanceMatrices) {
-            if (Math.abs(instanceMatrix[0] - - 0.9581351) < 0.0001) {
-                debugger;
-            }
-
             const renderInstInstance = renderInstManager.newRenderInst();
 
-            let offs = renderInstInstance.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 4 + 4 + 4);
+            let offs = renderInstInstance.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 4 + 4 + 4 + 2);
             const d = renderInstInstance.mapUniformBufferF32(SlyProgram.ub_ShapeParams);
 
-            mat4.copy(modelViewScratch2, modelViewScratch);
+            mat4.copy(modelViewMatScratch, viewMatScratch);
 
-            mat4.mul(modelViewScratch2, modelViewScratch2, instanceMatrix);
-            mat4.mul(modelViewScratch2, modelViewScratch2, this.rotX);
+            mat4.mul(modelViewMatScratch, modelViewMatScratch, this.rotX);
+            mat4.mul(modelViewMatScratch, modelViewMatScratch, instanceMatrix);
 
             if (this.isSkybox)
-                mat4.scale(modelViewScratch2, modelViewScratch2, [10, 10, 10]);
+                mat4.scale(modelViewMatScratch, modelViewMatScratch, [10, 10, 10]);
 
-            console.log(modelViewScratch2);
-            offs += fillMatrix4x4(d, offs, modelViewScratch2);
+            offs += fillMatrix4x4(d, offs, modelViewMatScratch);
             offs += fillColor(d, offs, this.unkTexColors[0]);
             offs += fillColor(d, offs, this.unkTexColors[1]);
+            offs += fillVec2v(d, offs, texOffset);
 
             renderInstInstance.drawIndexes(this.geometryData.indexCount);
             renderInstManager.submitRenderInst(renderInstInstance);
 
-            // break;
+            if (renderHacks.disableMeshInstances)
+                break;
         }
 
         renderInstManager.popTemplateRenderInst();

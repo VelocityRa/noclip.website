@@ -304,7 +304,7 @@ const sceneDescs = [
     new Sly1LevelSceneDesc("uw_c2_final", "Into the Machine", 0x8b09c0),
     new Sly1LevelSceneDesc("uw_bonus_security", "High Class Heist", 0x64e6a0),
     new Sly1LevelSceneDesc("uw_bonus_drivewheels", "The Fire Down Below", 0x624b70),
-    new Sly1LevelSceneDesc("uw_bonus_library", "A Cunning Disguise", 0x665770),
+    new Sly1LevelSceneDesc("uw_bonus_library", "A Cunning Disguise", 0x665370),
     new Sly1LevelSceneDesc("uw_t3_final", "Gunboat Graveyard", 0x87de10),
     new Sly1LevelSceneDesc("uw_rip_off", "Treasure in the Depths", 0xaadb0),
     new Sly1LevelSceneDesc("uw_boss_blimp", "The Eye of the Storm", 0x38ee80),

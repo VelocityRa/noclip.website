@@ -23,6 +23,16 @@ export class DataStream {
     public readFloat32(): number { const v = this.view.getFloat32(this.offs, true); this.offs += 0x04; return v; }
     public readVec3(): vec3 { return vec3.fromValues(this.readFloat32(), this.readFloat32(), this.readFloat32()); }
     public readVec4(): vec4 { return vec4.fromValues(this.readFloat32(), this.readFloat32(), this.readFloat32(), this.readFloat32()); }
+    public readMat4(): mat4 { return mat4.fromValues(
+        this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
+        this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
+        this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
+        this.readFloat32(), this.readFloat32(), this.readFloat32(), 1, //
+    );}
+
+    public readUint8At(offset: number): number { return this.view.getUint8(offset); }
+    public readUint16At(offset: number): number { return this.view.getUint16(offset, true); }
+    public readUint32At(offset: number): number { return this.view.getUint32(offset, true); }
 
     public align(alignment: number) { this.offs += (-this.offs) & (alignment - 1); }
 }
@@ -272,7 +282,27 @@ export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
     let meshIndex = 0;
     for (stream.offs = 0; stream.offs < binView.byteLength - 4; stream.offs++) {
         if (binView.getUint32(stream.offs, true) === Mesh.szmsMagic) {
-            stream.offs -= 4 + (4 * getField0x40(meshContainers.length) + 1);
+
+            let field0x40 = 0;
+            let found = false;
+
+            for (let j = 0; j < 0xB; ++j) {
+                if ((stream.readUint16At(stream.offs - 4 - 6 - j * 4) == 0xFFFF) &&
+                    ((stream.readUint8At(stream.offs - 4 - 4 - j * 4) == 0x01) ||
+                        (stream.readUint8At(stream.offs - 4 - 4 - j * 4) == 0x00))) {
+                    if (stream.readUint8At(stream.offs - 4 - 1 - j * 4) == j) {
+                        field0x40 = j;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!found) {
+                console.log(`[${hexzero0x(stream.offs)}] field0x40 pattern not found`);
+            }
+
+            stream.offs -= 4 + (4 * field0x40 + 1);
 
             let meshContainer = new MeshContainer(stream, meshIndex, meshContainers.length);
             meshIndex += meshContainer.meshes.length;
@@ -342,7 +372,7 @@ export class Mesh {
 
         // Read flags
         this.flags = stream.readUint16();
-        console.log(`flags ${hexzero0x(this.flags)}`);
+        console.log(`meshIndex ${meshIndex} flags ${hexzero(this.flags, 3)}`);
 
         this.isInstance = ((this.flags & 1) != 0);
 
@@ -350,13 +380,13 @@ export class Mesh {
             // Read SZMS header
 
             if (stream.readUint32() != Mesh.szmsMagic)
-                throw new Error(`bad SZMS magic`);
+                throw new Error(`[${hexzero0x(stream.offs)}] bad SZMS magic`);
 
             if (stream.readUint32() != 0x4)
-                throw new Error(`unsupported version`);
+                throw new Error(`[${hexzero0x(stream.offs)}] unsupported version`);
 
             if ((this.flags & 1) != 0)
-                throw new Error(`skipping mesh at ${hexzero0x(stream.offs - 2)}, has invalid flags: ${hexzero0x(this.flags)}`);
+                throw new Error(`[${hexzero0x(stream.offs)}] skipping mesh, has invalid flags: ${hexzero0x(this.flags)}`);
 
             const totalSize = stream.readUint32();
 
@@ -462,16 +492,7 @@ export class Mesh {
         } else { // This is a mesh instance
             stream.offs += 2;
 
-            this.instanceMatrix = mat4.fromValues(
-                stream.readFloat32(), stream.readFloat32(), stream.readFloat32(), 0, //
-                stream.readFloat32(), stream.readFloat32(), stream.readFloat32(), 0, //
-                stream.readFloat32(), stream.readFloat32(), stream.readFloat32(), 0, //
-                stream.readFloat32(), stream.readFloat32(), stream.readFloat32(), 1, //
-            );
-            mat4.transpose(this.instanceMatrix, this.instanceMatrix);
-
-            // if (meshIndex == 240)
-            //     debugger;
+            this.instanceMatrix = stream.readMat4();
         }
 
         // Read SZME header
@@ -513,136 +534,143 @@ export class Mesh {
             const unkVec3 = stream.readVec3();
             const unkVec4 = stream.readVec4();
         }
+        if (((this.flags & 0x100) != 0)) {
+            const unk0x100u16 = stream.readUint16();
+            const unk0x100u8 = stream.readUint8();
 
-        if (((this.flags & 0x100) == 0)) {
-            // Read SZME data
-
-            const position: vec3 = stream.readVec3();
-            const unkFloat0x14 = stream.readFloat32();
-            stream.readUint16();
-            const unkByte0x1A = stream.readUint8();
-            const unkByte0x1B = stream.readUint8();
-            const unkByte0x1C = stream.readUint8();
-
-            if (!this.isInstance) {
-                const szmeChunkCount = stream.readUint16();
-
-                // if (szmsChunkCount != szmeChunkCount)
-                //     throw new Error(`szmsChunkCount(${szmsChunkCount}) != szmeChunkCount(${szmeChunkCount})`);
-
-                // if (szmeChunkCount < 0xFF) {
-                for (let szmeChunkIndex = 0; szmeChunkIndex < szmeChunkCount; ++szmeChunkIndex) {
-                    const origin: vec3 = stream.readVec3();
-
-                    const unkFloat = stream.readFloat32();
-                    const unkCount1 = stream.readUint8();
-                    const unkCount2 = stream.readUint8();
-                    const unkCount3 = stream.readUint8();
-                    const unkCount4 = stream.readUint8();
-                    const unkCount5 = stream.readUint8();
-
-                    stream.align(4);
-
-                    let positions = new Float32Array(unkCount1 * 3);
-                    for (let i = 0; i < unkCount1 * 3; i += 3) {
-                        positions[i + 0] = stream.readFloat32();
-                        positions[i + 1] = stream.readFloat32();
-                        positions[i + 2] = stream.readFloat32();
-                    }
-
-                    let rotations = new Float32Array(unkCount2 * 3);
-                    for (let i = 0; i < unkCount2 * 3; i += 3) {
-                        rotations[i + 0] = stream.readFloat32();
-                        rotations[i + 1] = stream.readFloat32();
-                        rotations[i + 2] = stream.readFloat32();
-                    }
-
-                    let unkColors = new Uint32Array(unkCount3);
-                    for (let i = 0; i < unkCount3; i++) {
-                        unkColors[i] = stream.readUint32();
-                    }
-
-                    let texCoords = new Float32Array(unkCount4 * 2);
-                    for (let i = 0; i < unkCount4 * 2; i += 2) {
-                        texCoords[i + 0] = stream.readFloat32();
-                        texCoords[i + 1] = stream.readFloat32();
-                    }
-
-                    let unkIndices = new Uint32Array(unkCount5);
-                    // let unkIndicesFloats = new Float32Array(unkCount5 * 4);
-                    for (let i = 0; i < unkCount5; i++) {
-                        unkIndices[i] = stream.readUint32();
-                        // stream.offs -= 4;
-                        // unkIndicesFloats[i * 4 + 0] = stream.readUint8() / 255;
-                        // unkIndicesFloats[i * 4 + 1] = stream.readUint8() / 255;
-                        // unkIndicesFloats[i * 4 + 2] = stream.readUint8() / 255;
-                        // unkIndicesFloats[i * 4 + 3] = stream.readUint8() / 255;
-                        // if (szmeChunkIndex == 0)
-                        // console.log(`AT ${hexzero0x(stream.offs-4)} is [${lightingFloats[i * 4 + 0]}, ${lightingFloats[i * 4 + 1]}, ${lightingFloats[i * 4 + 2]}, ${lightingFloats[i * 4 + 3]},]`);
-                    }
-
-                    const texIndex = stream.readUint16();
-
-                    // console.log(`[${hexzero0x(stream.offs)}] texID ${hexzero0x(texIndex)}`);
-
-                    const unkByte1 = stream.readUint8();
-                    const unkByte2 = stream.readUint8();
-
-                    stream.offs += unkByte2; // u8
-
-                    stream.offs += unkByte2 * unkCount1 * 4; // float
-
-                    // Read field_0x40_data
-                    if (container.field0x40 != 0) {
-                        const unkPosCount = stream.readUint16();
-                        stream.offs += unkPosCount * 4 * 3; // vec3
-
-                        const unkNormalCount = stream.readUint16();
-                        stream.offs += unkNormalCount * 4 * 3; // vec3
-
-                        stream.offs += unkCount5 * 2; // u16, tri list
-
-                        let nestedCount = container.field0x40 * 2 - 1;
-
-                        stream.offs += unkCount5 * nestedCount * 2; // u16
-                    }
-
-                    this.chunks[szmeChunkIndex].szme = { origin, positions, rotations, unkColors, texCoords, unkIndices, texIndex, unkByte1, unkByte2 };
-                    totalChunkIndex++;
-                }
-                // } else {
-                //     console.warn(`skipping szme data of index ${szmeOffs + 0x23}, has too many chunks`);
-                // }
-
-                // Read 'After SZME' array
-
-                const afterSzmeCount = stream.readUint16();
-                for (let afterSzmeI = 0; afterSzmeI < afterSzmeCount; afterSzmeI++) {
-                    const unkCount1 = stream.readUint8();
-                    stream.offs += unkCount1 * 4 * 3; // vec3
-
-                    const unkCount2 = stream.readUint8();
-                    stream.offs += unkCount2 * 4; // u32
-
-                    const unkCount3 = stream.readUint8();
-                    stream.offs += unkCount3; // u8
-
-                    stream.offs += unkCount1 * unkCount3 * 4; // float
-
-                    if (container.field0x40 != 0) {
-                        // Read 'After SZME nested' array
-
-                        const unkCount4 = stream.readUint8();
-                        stream.offs += unkCount4 * 4 * 3; // vec3
-
-                        stream.offs += unkCount1 * container.field0x40 * 2; // u16
-                    }
-                }
+            if (unk0x100u8 != 0xFF) {
+                const unkFloatArr = [stream.readFloat32(), stream.readFloat32(), stream.readFloat32(), stream.readFloat32()];
+                const unkMat4 = stream.readMat4();
             }
 
-            this.szmeHeader = { position };
-        } else {
-            console.warn(`skipping szme data at ${szmeOffs}, has invalid flags: ${hexzero0x(this.flags)}`);
+            const unkU8Arr = [stream.readUint8(), stream.readUint8(), stream.readUint8()];
         }
+
+        // Read SZME data
+
+        const position: vec3 = stream.readVec3();
+        const unkFloat0x14 = stream.readFloat32();
+        stream.readUint16();
+        const unkByte0x1A = stream.readUint8();
+        const unkByte0x1B = stream.readUint8();
+        const unkByte0x1C = stream.readUint8();
+
+        if (!this.isInstance) {
+            const szmeChunkCount = stream.readUint16();
+
+            // if (szmsChunkCount != szmeChunkCount)
+            //     throw new Error(`szmsChunkCount(${szmsChunkCount}) != szmeChunkCount(${szmeChunkCount})`);
+
+            // if (szmeChunkCount < 0xFF) {
+            for (let szmeChunkIndex = 0; szmeChunkIndex < szmeChunkCount; ++szmeChunkIndex) {
+                const origin: vec3 = stream.readVec3();
+
+                const unkFloat = stream.readFloat32();
+                const unkCount1 = stream.readUint8();
+                const unkCount2 = stream.readUint8();
+                const unkCount3 = stream.readUint8();
+                const unkCount4 = stream.readUint8();
+                const unkCount5 = stream.readUint8();
+
+                stream.align(4);
+
+                let positions = new Float32Array(unkCount1 * 3);
+                for (let i = 0; i < unkCount1 * 3; i += 3) {
+                    positions[i + 0] = stream.readFloat32();
+                    positions[i + 1] = stream.readFloat32();
+                    positions[i + 2] = stream.readFloat32();
+                }
+
+                let rotations = new Float32Array(unkCount2 * 3);
+                for (let i = 0; i < unkCount2 * 3; i += 3) {
+                    rotations[i + 0] = stream.readFloat32();
+                    rotations[i + 1] = stream.readFloat32();
+                    rotations[i + 2] = stream.readFloat32();
+                }
+
+                let unkColors = new Uint32Array(unkCount3);
+                for (let i = 0; i < unkCount3; i++) {
+                    unkColors[i] = stream.readUint32();
+                }
+
+                let texCoords = new Float32Array(unkCount4 * 2);
+                for (let i = 0; i < unkCount4 * 2; i += 2) {
+                    texCoords[i + 0] = stream.readFloat32();
+                    texCoords[i + 1] = stream.readFloat32();
+                }
+
+                let unkIndices = new Uint32Array(unkCount5);
+                // let unkIndicesFloats = new Float32Array(unkCount5 * 4);
+                for (let i = 0; i < unkCount5; i++) {
+                    unkIndices[i] = stream.readUint32();
+                    // stream.offs -= 4;
+                    // unkIndicesFloats[i * 4 + 0] = stream.readUint8() / 255;
+                    // unkIndicesFloats[i * 4 + 1] = stream.readUint8() / 255;
+                    // unkIndicesFloats[i * 4 + 2] = stream.readUint8() / 255;
+                    // unkIndicesFloats[i * 4 + 3] = stream.readUint8() / 255;
+                    // if (szmeChunkIndex == 0)
+                    // console.log(`AT ${hexzero0x(stream.offs-4)} is [${lightingFloats[i * 4 + 0]}, ${lightingFloats[i * 4 + 1]}, ${lightingFloats[i * 4 + 2]}, ${lightingFloats[i * 4 + 3]},]`);
+                }
+
+                const texIndex = stream.readUint16();
+
+                // console.log(`[${hexzero0x(stream.offs)}] texID ${hexzero0x(texIndex)}`);
+
+                const unkByte1 = stream.readUint8();
+                const unkByte2 = stream.readUint8();
+
+                stream.offs += unkByte2; // u8
+
+                stream.offs += unkByte2 * unkCount1 * 4; // float
+
+                // Read field_0x40_data
+                if (container.field0x40 != 0) {
+                    const unkPosCount = stream.readUint16();
+                    stream.offs += unkPosCount * 4 * 3; // vec3
+
+                    const unkNormalCount = stream.readUint16();
+                    stream.offs += unkNormalCount * 4 * 3; // vec3
+
+                    stream.offs += unkCount5 * 2; // u16, tri list
+
+                    let nestedCount = container.field0x40 * 2 - 1;
+
+                    stream.offs += unkCount5 * nestedCount * 2; // u16
+                }
+
+                this.chunks[szmeChunkIndex].szme = { origin, positions, rotations, unkColors, texCoords, unkIndices, texIndex, unkByte1, unkByte2 };
+                totalChunkIndex++;
+            }
+            // } else {
+            //     console.warn(`skipping szme data of index ${szmeOffs + 0x23}, has too many chunks`);
+            // }
+
+            // Read 'After SZME' array
+
+            const afterSzmeCount = stream.readUint16();
+            for (let afterSzmeI = 0; afterSzmeI < afterSzmeCount; afterSzmeI++) {
+                const unkCount1 = stream.readUint8();
+                stream.offs += unkCount1 * 4 * 3; // vec3
+
+                const unkCount2 = stream.readUint8();
+                stream.offs += unkCount2 * 4; // u32
+
+                const unkCount3 = stream.readUint8();
+                stream.offs += unkCount3; // u8
+
+                stream.offs += unkCount1 * unkCount3 * 4; // float
+
+                if (container.field0x40 != 0) {
+                    // Read 'After SZME nested' array
+
+                    const unkCount4 = stream.readUint8();
+                    stream.offs += unkCount4 * 4 * 3; // vec3
+
+                    stream.offs += unkCount1 * container.field0x40 * 2; // u16
+                }
+            }
+        }
+
+        this.szmeHeader = { position };
     }
 }
