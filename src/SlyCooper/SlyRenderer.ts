@@ -4,7 +4,7 @@ import { FakeTextureHolder } from '../TextureHolder';
 import { GfxDevice, GfxRenderPass, GfxBindingLayoutDescriptor, GfxHostAccessPass, GfxMegaStateDescriptor, GfxCullMode, GfxFrontFaceMode, GfxBlendMode, GfxBlendFactor, GfxSampler, GfxTexture, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxProgramDescriptorSimple, makeTextureDescriptor2D, GfxColor } from "../gfx/platform/GfxPlatform";
 import { preprocessProgramObj_GLSL, DefineMap } from "../gfx/shaderc/GfxShaderCompiler";
 import { GfxRenderHelper } from "../gfx/render/GfxRenderGraph";
-import { BasicRenderTarget, standardFullClearRenderPassDescriptor } from "../gfx/helpers/RenderTargetHelpers";
+import { BasicRenderTarget, opaqueBlackFullClearRenderPassDescriptor } from "../gfx/helpers/RenderTargetHelpers";
 import { GfxRenderInstManager, GfxRendererLayer, makeSortKey, makeSortKeyOpaque } from "../gfx/render/GfxRenderer";
 import { fillVec2v, fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v, fillColor } from "../gfx/helpers/UniformBufferHelpers";
 import { mat4, vec3, vec2, vec4 } from "gl-matrix";
@@ -290,7 +290,7 @@ export class SlyRenderer implements Viewer.SceneGfx {
         device.submitPass(hostAccessPass);
 
         this.renderTarget.setParameters(device, renderInput.backbufferWidth, renderInput.backbufferHeight);
-        const passRenderer = this.renderTarget.createRenderPass(device, renderInput.viewport, standardFullClearRenderPassDescriptor);
+        const passRenderer = this.renderTarget.createRenderPass(device, renderInput.viewport, opaqueBlackFullClearRenderPassDescriptor);
         renderInstManager.drawOnPassRenderer(device, passRenderer);
         renderInstManager.resetRenderInsts();
 
