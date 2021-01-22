@@ -255,6 +255,7 @@ export enum MeshFlag {
     Static = 1 << 1,
     NoShading = 1 << 2, // maybe
     Skybox = 1 << 3,
+    //Spotlights = 1 << 4,
     TreasureKeys = 1 << 5,
     Coins = 1 << 7, // and glow part of treasure keys (?)
 }
@@ -289,7 +290,7 @@ export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
             for (let j = 0; j < 0xB; ++j) {
                 if ((stream.readUint16At(stream.offs - 4 - 6 - j * 4) == 0xFFFF) &&
                     ((stream.readUint8At(stream.offs - 4 - 4 - j * 4) == 0x01) ||
-                        (stream.readUint8At(stream.offs - 4 - 4 - j * 4) == 0x00))) {
+                    (stream.readUint8At(stream.offs - 4 - 4 - j * 4) == 0x00))) {
                     if (stream.readUint8At(stream.offs - 4 - 1 - j * 4) == j) {
                         field0x40 = j;
                         found = true;
