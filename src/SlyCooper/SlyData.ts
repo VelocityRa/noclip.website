@@ -284,7 +284,8 @@ export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
 
     let meshIndex = 0;
     for (stream.offs = 0; stream.offs < binView.byteLength - 4; stream.offs++) {
-        if (binView.getUint32(stream.offs, true) === Mesh.szmsMagic) {
+        if (binView.getUint32(stream.offs, true) === Mesh.szmsMagic &&
+            binView.getUint32(stream.offs + 4, true) === Mesh.szmsVersion) {
 
             let field0x40 = 0;
             let found = false;
@@ -331,6 +332,7 @@ export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
 
 export class MeshContainer {
     public meshes: Mesh[] = [];
+    public meshInstances: Mesh[] = [];
 
     public field0x40: number;
 
@@ -346,7 +348,7 @@ export class MeshContainer {
             const mesh = new Mesh(stream, meshIndex, this);
 
             if (mesh.isInstance) {
-                this.meshes[this.meshes.length - 1].instances.push(mesh);
+                this.meshInstances.push(mesh);
             } else {
                 this.meshes.push(mesh);
             }
@@ -361,6 +363,8 @@ export class Mesh {
     static readonly szmsMagic = 0x534D5A53; // "SZMS"
     static readonly szmeMagic = 0x454d5a53; // "SZME"
 
+    static readonly szmsVersion = 4;
+
     public flags: number;
     public offset: number;
 
@@ -368,7 +372,6 @@ export class Mesh {
     public szmeHeader: (SzmeHeader | undefined);
 
     public isInstance: boolean; // Is an instatiation of a previously defined Mesh
-    public instances: Mesh[] = []; // Mesh instances, but _not_ necessarily of this Mesh. See field below.
     public instanceMeshIndex: number // Index to which (non-instance) mesh in this container to instantiate
     public instanceMatrix: mat4;
 
@@ -377,7 +380,7 @@ export class Mesh {
 
         // Read flags
         this.flags = stream.readUint16();
-        console.log(`meshIndex ${meshIndex} flags ${hexzero(this.flags, 3)}`);
+        console.log(`container ${container.containerIndex} meshIndex ${meshIndex} flags ${hexzero(this.flags, 3)}`);
 
         this.isInstance = ((this.flags & 1) != 0);
 

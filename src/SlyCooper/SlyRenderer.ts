@@ -209,19 +209,17 @@ export class SlyRenderer implements Viewer.SceneGfx {
         for (let meshContainer of meshContainers) {
             let meshInstancesMap = new Map<number, Data.Mesh[]>();
 
-            for (let mesh of meshContainer.meshes) {
-                for (let meshInstance of mesh.instances) {
-                    const instanceMeshIndex = meshInstance.instanceMeshIndex;
+            for (let meshInstance of meshContainer.meshInstances) {
+                const instanceMeshIndex = meshInstance.instanceMeshIndex;
 
-                    let meshInstances: Data.Mesh[];
-                    if (meshInstancesMap.has(instanceMeshIndex))
-                        meshInstances = meshInstancesMap.get(instanceMeshIndex)!;
-                    else
-                        meshInstances = [];
+                let meshInstances: Data.Mesh[];
+                if (meshInstancesMap.has(instanceMeshIndex))
+                    meshInstances = meshInstancesMap.get(instanceMeshIndex)!;
+                else
+                    meshInstances = [];
 
-                    meshInstances.push(meshInstance);
-                    meshInstancesMap.set(instanceMeshIndex, meshInstances);
-                }
+                meshInstances.push(meshInstance);
+                meshInstancesMap.set(instanceMeshIndex, meshInstances);
             }
 
             for (let mesh of meshContainer.meshes) {
@@ -480,8 +478,8 @@ export class SlyRenderer implements Viewer.SceneGfx {
 class FlagLayer {
     public name: string
 
-    constructor(private flagValue: number, private meshRenderers: SlyMeshRenderer[], public visible: boolean = true) {
-        this.name = `${binzero(flagValue, 9)} (${hexzero0x(flagValue, 3)})`;
+    constructor(private flagValue: number, private meshCount: number, private meshRenderers: SlyMeshRenderer[], public visible: boolean = true) {
+        this.name = `Flag: ${binzero(flagValue, 9)} (${hexzero0x(flagValue, 3)}) | Count: ${meshCount}`;
     }
     public setVisible(v: boolean): void {
         this.visible = v;
@@ -509,19 +507,31 @@ function isDefaultFlag(flagValue: number) {
 }
 
 function createFlagLayers(meshRenderers: SlyMeshRenderer[]): FlagLayer[] {
-    const flagValues = [0x0, 0x2, 0x4, 0x6, 0xC, 0x10, 0x12, 0x14, 0x16, 0x20, 0x30, 0x40, 0x42, 0x44, 0x46, 0x56, 0x80, 0xB0, 0x102, 0x104, 0x110, 0x142, 0x156];
+    let flagValuesCountMap = new Map<number, number>();
 
-    // TODO: disable for release
     for (let meshRenderer of meshRenderers) {
-        if (!flagValues.includes(meshRenderer.meshChunk.flags)) {
-            console.warn(`no layer for flags ${hexzero(meshRenderer.meshChunk.flags)} in mesh of ${meshRenderer.meshChunk.flags}`);
-        }
+        const flags = meshRenderer.meshChunk.flags;
+
+        if (flagValuesCountMap.has(flags))
+            flagValuesCountMap.set(flags, flagValuesCountMap.get(flags)! + 1);
+        else
+            flagValuesCountMap.set(flags, 1);
     }
 
+    // Sort the map
+    flagValuesCountMap = new Map([...flagValuesCountMap].sort((a: [number, number], b: [number, number]) => {
+        if (a[0] < b[0])
+            return -1;
+        if (a[0] > b[0])
+            return 1;
+        else
+            return 0;
+    }));
+
     let flagLayers: FlagLayer[] = [];
-    for (let flagValue of flagValues) {
+    for (let [flagValue, meshCount] of flagValuesCountMap) {
         const isVisibleByDefault = isDefaultFlag(flagValue);
-        flagLayers.push(new FlagLayer(flagValue, meshRenderers, isVisibleByDefault));
+        flagLayers.push(new FlagLayer(flagValue, meshCount, meshRenderers, isVisibleByDefault));
     }
     return flagLayers;
 }
