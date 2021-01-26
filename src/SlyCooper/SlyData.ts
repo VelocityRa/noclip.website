@@ -23,12 +23,14 @@ export class DataStream {
     public readFloat32(): number { const v = this.view.getFloat32(this.offs, true); this.offs += 0x04; return v; }
     public readVec3(): vec3 { return vec3.fromValues(this.readFloat32(), this.readFloat32(), this.readFloat32()); }
     public readVec4(): vec4 { return vec4.fromValues(this.readFloat32(), this.readFloat32(), this.readFloat32(), this.readFloat32()); }
-    public readMat4(): mat4 { return mat4.fromValues(
-        this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
-        this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
-        this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
-        this.readFloat32(), this.readFloat32(), this.readFloat32(), 1, //
-    );}
+    public readMat4(): mat4 {
+        return mat4.fromValues(
+            this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
+            this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
+            this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
+            this.readFloat32(), this.readFloat32(), this.readFloat32(), 1, //
+        );
+    }
 
     public readUint8At(offset: number): number { return this.view.getUint8(offset); }
     public readUint16At(offset: number): number { return this.view.getUint16(offset, true); }
@@ -290,7 +292,7 @@ export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
             for (let j = 0; j < 0xB; ++j) {
                 if ((stream.readUint16At(stream.offs - 4 - 6 - j * 4) == 0xFFFF) &&
                     ((stream.readUint8At(stream.offs - 4 - 4 - j * 4) == 0x01) ||
-                    (stream.readUint8At(stream.offs - 4 - 4 - j * 4) == 0x00))) {
+                        (stream.readUint8At(stream.offs - 4 - 4 - j * 4) == 0x00))) {
                     if (stream.readUint8At(stream.offs - 4 - 1 - j * 4) == j) {
                         field0x40 = j;
                         found = true;
@@ -342,6 +344,7 @@ export class MeshContainer {
 
         for (let i = 0; i < meshCount; ++i) {
             const mesh = new Mesh(stream, meshIndex, this);
+
             if (mesh.isInstance) {
                 this.meshes[this.meshes.length - 1].instances.push(mesh);
             } else {
@@ -364,8 +367,9 @@ export class Mesh {
     public chunks: MeshChunk[] = [];
     public szmeHeader: (SzmeHeader | undefined);
 
-    public isInstance: boolean; // is an instatiation of a previously defined Mesh
-    public instances: Mesh[] = [];
+    public isInstance: boolean; // Is an instatiation of a previously defined Mesh
+    public instances: Mesh[] = []; // Mesh instances, but _not_ necessarily of this Mesh. See field below.
+    public instanceMeshIndex: number // Index to which (non-instance) mesh in this container to instantiate
     public instanceMatrix: mat4;
 
     constructor(stream: DataStream, public meshIndex: number, public container: MeshContainer) {
@@ -491,7 +495,7 @@ export class Mesh {
                 this.chunks.push({ positions, normals, texCoords, vertexColor, vertexColorFloats, trianglesIndices, unkIndices, szme, name, flags });
             }
         } else { // This is a mesh instance
-            stream.offs += 2;
+            this.instanceMeshIndex = stream.readUint16()
 
             this.instanceMatrix = stream.readMat4();
         }

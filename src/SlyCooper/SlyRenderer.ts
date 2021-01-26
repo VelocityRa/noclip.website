@@ -206,16 +206,25 @@ export class SlyRenderer implements Viewer.SceneGfx {
 
         const gfxCache = this.renderHelper.getCache();
 
-        let identMat4 = mat4.create();
-        mat4.identity(identMat4)
-
         for (let meshContainer of meshContainers) {
+            let meshInstancesMap = new Map<number, Data.Mesh[]>();
+
             for (let mesh of meshContainer.meshes) {
-                let instanceMatrices: mat4[] = [ identMat4 ];
+                for (let meshInstance of mesh.instances) {
+                    const instanceMeshIndex = meshInstance.instanceMeshIndex;
 
-                for (let instance of mesh.instances)
-                    instanceMatrices.push(instance.instanceMatrix);
+                    let meshInstances: Data.Mesh[];
+                    if (meshInstancesMap.has(instanceMeshIndex))
+                        meshInstances = meshInstancesMap.get(instanceMeshIndex)!;
+                    else
+                        meshInstances = [];
 
+                    meshInstances.push(meshInstance);
+                    meshInstancesMap.set(instanceMeshIndex, meshInstances);
+                }
+            }
+
+            for (let mesh of meshContainer.meshes) {
                 for (let meshChunk of mesh.chunks) {
                     const geometryData = new GeometryData(device, gfxCache, meshChunk);
 
@@ -247,7 +256,8 @@ export class SlyRenderer implements Viewer.SceneGfx {
                         textureEntry = textureEntries[texIndex];
                     }
 
-                    const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk, textureEntry, isFullyOpaque, instanceMatrices);
+                    const meshInstances = meshInstancesMap.get(mesh.meshIndex);
+                    const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk, textureEntry, isFullyOpaque, meshInstances);
                     meshRenderer.setVisible(isDefaultFlag(meshChunk.flags));
                     this.meshRenderers.push(meshRenderer);
                 }
@@ -658,13 +668,15 @@ export class SlyMeshRenderer {
 
     private rotX: mat4 = mat4.create();
 
+    private instanceMatrices: mat4[] = [mat4.create()];
+
     constructor(
         textureData: (TextureData | null)[],
         public geometryData: GeometryData,
         public meshChunk: Data.MeshChunk,
         textureEntry: (Data.TextureEntry | null),
         private isFullyOpaque: boolean,
-        private instanceMatrices: mat4[]) {
+        meshInstances: Data.Mesh[] | undefined) {
 
         this.name = meshChunk.name;
 
@@ -705,6 +717,10 @@ export class SlyMeshRenderer {
         this.rotX = mat4.fromXRotation(this.rotX, 3 * 90 * MathConstants.DEG_TO_RAD);
 
         this.isSkybox = checkFlag(meshChunk.flags, Data.MeshFlag.Skybox);
+
+        if (meshInstances)
+            for (let meshInstance of meshInstances)
+                this.instanceMatrices.push(meshInstance.instanceMatrix)
     }
 
     public prepareToRender(renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput) {
