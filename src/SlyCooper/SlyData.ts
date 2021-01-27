@@ -2,7 +2,6 @@ import ArrayBufferSlice from '../ArrayBufferSlice';
 import { SceneGroup, SceneDesc, SceneGfx, ViewerRenderInput } from "../viewer";
 import * as Viewer from "../viewer";
 import { assert, hexzero, hexzero0x, spacePad } from '../util';
-import { downloadCanvasAsPng, downloadText } from "../DownloadUtils";
 import { clamp, range, range_end } from '../MathHelpers';
 import * as Settings from './SlyConstants';
 import { vec2, vec3, vec4, mat4, ReadonlyMat4, ReadonlyVec3 } from "gl-matrix";
@@ -136,10 +135,6 @@ function getCsm1ClutIndices(): Uint8Array {
     return tbl;
 }
 
-function sleep(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 export class Texture {
     public texels_rgba: Uint8Array;
     public viewerTexture: Viewer.Texture[] = [];
@@ -148,6 +143,9 @@ export class Texture {
     public isFullyOpaque = true;
 
     private static csm1ClutIndices = getCsm1ClutIndices();
+
+    private canvasTex: (Viewer.Texture | null) = null;
+
     constructor(paletteBuf: ArrayBufferSlice, imageBuf: ArrayBufferSlice,
         public width: number, public height: number, colorCount: number, colorSize: number, public name: string = "N/A") {
 
@@ -174,7 +172,10 @@ export class Texture {
         }
     }
 
-    public async toCanvas(): Promise<Viewer.Texture> {
+    public toCanvas(): Viewer.Texture {
+        if (this.canvasTex)
+            return this.canvasTex;
+
         const canvas = document.createElement("canvas");
         const width = this.width;
         const height = this.height;
@@ -198,15 +199,12 @@ export class Texture {
         ctx.putImageData(imgData, 0, 0);
         const surfaces = [canvas];
 
-        if (Settings.TEXTURES_EXPORT) {
-            downloadCanvasAsPng(canvas, this.name);
-            await sleep(100); // todo test
-        }
-
         const extraInfo = new Map<string, string>();
         // extraInfo.set('Format', 'IDTEX8-CSM1 (PS2)'); // todo: wrong
 
-        return { name: this.name, surfaces, extraInfo };
+        this.canvasTex = { name: this.name, surfaces, extraInfo };
+
+        return this.canvasTex;
     }
 }
 
@@ -262,20 +260,6 @@ export enum MeshFlag {
     Coins = 1 << 7, // and glow part of treasure keys (?)
 }
 
-function getField0x40(idx: number): number {
-    // for Stealthy
-    switch (idx) {
-        case 83: return 1;
-        case 159: return 8;
-        case 185: return 4;
-        case 213: return 2;
-        case 296: return 10;
-        case 299: return 4;
-        case 300: return 5;
-        default: return 0;
-    }
-}
-
 export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
     const binView = buffer.createDataView();
     let stream = new DataStream(buffer, binView);
@@ -315,19 +299,6 @@ export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
     }
 
     return meshContainers;
-
-    // let index = 0;
-    // for (let offset = 0; offset < bin.byteLength - 4; ++offset) {
-    //     if (binView.getUint32(offset, true) === Data.Mesh.szmsMagic) {
-    //         try {
-
-    //             this.meshes.push(new Data.Mesh(bin, offset, index));
-    //             ++index;
-    //         } catch (e) {
-    //             console.warn(`Error parsing mesh: ${e}`);
-    //         }
-    //     }
-    // }
 }
 
 export class MeshContainer {
