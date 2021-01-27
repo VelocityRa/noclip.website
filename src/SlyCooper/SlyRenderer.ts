@@ -26,7 +26,8 @@ class SlyRenderHacks {
     disableTextures = false;
     disableVertexColors = false;
     disableAmbientLighting = true;
-    disableTextureColor = true;
+    disableTextureColor1 = true;
+    disableTextureColor2 = true;
     disableMeshInstances = false;
 }
 
@@ -95,7 +96,6 @@ void main() {
 in vec2 v_TexCoord;
 in vec3 v_Normal;
 in vec3 v_VertexColor;
-in vec3 v_VertexColor2;
 
 void main() {
     vec2 t_TexCoord = mod(v_TexCoord + u_TexOffset, vec2(1.0));
@@ -132,10 +132,20 @@ void main() {
     vec4 inv_lit = vec4(0.105, 0.105, 0.105, 0.501);
     float tc1_w = 0.5;
 
-    vec3 diffuseFinal = t_DiffuseMapColor * vertexColor * vertexLighting;
-#if ENABLE_TEXTURE_COLOR
-    diffuseFinal *= u_TextureColor1.rgb;
+#if ENABLE_TEXTURE_COLOR1
+    vertexColor *= u_TextureColor1.rgb;
 #endif
+#if ENABLE_TEXTURE_COLOR2
+    vertexColor *= u_TextureColor2.rgb;
+#endif
+
+    vec3 diffuseFinal = t_DiffuseMapColor * vertexColor * vertexLighting;
+// #if ENABLE_TEXTURE_COLOR1
+//     diffuseFinal *= u_TextureColor1.rgb;
+// #endif
+// #if ENABLE_TEXTURE_COLOR2
+//     diffuseFinal *= u_TextureColor2.rgb;
+// #endif
 
 #if ENABLE_AMBIENT_LIGHTING
     vec3 lightDirection = normalize(vec3(0.1027, 0.02917, 0.267));
@@ -177,7 +187,8 @@ void main() {
         this.defines.set("ENABLE_TEXTURES", boolToStr(renderHacks.disableTextures));
         this.defines.set("ENABLE_VERTEX_COLORS", boolToStr(renderHacks.disableVertexColors));
         this.defines.set("ENABLE_AMBIENT_LIGHTING", boolToStr(renderHacks.disableAmbientLighting));
-        this.defines.set("ENABLE_TEXTURE_COLOR", boolToStr(renderHacks.disableTextureColor));
+        this.defines.set("ENABLE_TEXTURE_COLOR1", boolToStr(renderHacks.disableTextureColor1));
+        this.defines.set("ENABLE_TEXTURE_COLOR2", boolToStr(renderHacks.disableTextureColor2));
     }
 }
 
@@ -389,8 +400,13 @@ export class SlyRenderer implements Viewer.SceneGfx {
         this.program = null;
     }
 
-    private setTextureColorEnabled(enabled: boolean) {
-        renderHacks.disableTextureColor = !enabled;
+    private setTextureColor1Enabled(enabled: boolean) {
+        renderHacks.disableTextureColor1 = !enabled;
+        this.program = null;
+    }
+
+    private setTextureColor2Enabled(enabled: boolean) {
+        renderHacks.disableTextureColor2 = !enabled;
         this.program = null;
     }
 
@@ -424,11 +440,17 @@ export class SlyRenderer implements Viewer.SceneGfx {
         };
         renderHacksPanel.contents.appendChild(enableAmbientLighting.elem);
 
-        const enableTextureColor = new UI.Checkbox('Enable Texture Color', !renderHacks.disableTextureColor);
-        enableTextureColor.onchanged = () => {
-            this.setTextureColorEnabled(enableTextureColor.checked);
+        const enableTextureColor1 = new UI.Checkbox('Enable Texture Color 1', !renderHacks.disableTextureColor1);
+        enableTextureColor1.onchanged = () => {
+            this.setTextureColor1Enabled(enableTextureColor1.checked);
         };
-        renderHacksPanel.contents.appendChild(enableTextureColor.elem);
+        renderHacksPanel.contents.appendChild(enableTextureColor1.elem);
+
+        const enableTextureColor2 = new UI.Checkbox('Enable Texture Color 2', !renderHacks.disableTextureColor2);
+        enableTextureColor2.onchanged = () => {
+            this.setTextureColor2Enabled(enableTextureColor2.checked);
+        };
+        renderHacksPanel.contents.appendChild(enableTextureColor2.elem);
 
         const enableMeshInstances = new UI.Checkbox('Enable Mesh Instances', !renderHacks.disableMeshInstances);
         enableMeshInstances.onchanged = () => {
@@ -491,19 +513,13 @@ class FlagLayer {
     }
 }
 
-function checkFlag(value1: number, value2: number) {
-    return (value1 & value2) != 0;
-}
-
-function getDefaultFlags() {
-    return Data.MeshFlag.Static | Data.MeshFlag.Skybox;
-}
-
-function isDefaultFlag(flagValue: number) {
+function isDefaultFlag(flagValue: number): boolean {
     if (Settings.SHOW_ALL_MESHES)
         return true;
     else
-        return checkFlag(flagValue, getDefaultFlags());
+        return ((flagValue & (Data.MeshFlag.Static | Data.MeshFlag.Skybox)) != 0) ||
+            (flagValue == 0x44) ||
+            (flagValue == 0x100);
 }
 
 function createFlagLayers(meshRenderers: SlyMeshRenderer[]): FlagLayer[] {
@@ -520,12 +536,9 @@ function createFlagLayers(meshRenderers: SlyMeshRenderer[]): FlagLayer[] {
 
     // Sort the map
     flagValuesCountMap = new Map([...flagValuesCountMap].sort((a: [number, number], b: [number, number]) => {
-        if (a[0] < b[0])
-            return -1;
-        if (a[0] > b[0])
-            return 1;
-        else
-            return 0;
+        if      (a[0] < b[0]) return -1;
+        else if (a[0] > b[0]) return 1;
+        else                  return 0;
     }));
 
     let flagLayers: FlagLayer[] = [];
@@ -726,7 +739,7 @@ export class SlyMeshRenderer {
 
         this.rotX = mat4.fromXRotation(this.rotX, 3 * 90 * MathConstants.DEG_TO_RAD);
 
-        this.isSkybox = checkFlag(meshChunk.flags, Data.MeshFlag.Skybox);
+        this.isSkybox = ((meshChunk.flags & Data.MeshFlag.Skybox) != 0);
 
         if (meshInstances)
             for (let meshInstance of meshInstances)

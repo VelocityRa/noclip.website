@@ -9,6 +9,8 @@ import { assert, hexzero, hexzero0x, leftPad } from '../util';
 import { NamedArrayBufferSlice } from "../DataFetcher";
 import { downloadCanvasAsPng, downloadText } from "../DownloadUtils";
 import { range, range_end } from '../MathHelpers';
+import { downloadBuffer } from '../DownloadUtils';
+import { makeZipFile, ZipFileEntry } from '../ZipFile';
 import { SlyRenderer } from './SlyRenderer';
 import * as Settings from './SlyConstants';
 import * as Data from './SlyData';
@@ -140,8 +142,16 @@ class Sly1LevelSceneDesc implements SceneDesc {
                 // console.log(`w: ${width} h: ${height} C: ${hexzero(clutMeta.offset, 8)} I: ${hexzero(imageMeta.offset, 8)}`);
                 const paletteBuf = bin.slice(this.tex_pal_offs + clutMeta.offset);
                 const imageBuf = bin.slice(this.tex_pal_offs + imageMeta.offset)
-                const name = sprintf(`Id %03d-%03d-%03d Res %04dx%04d Clt %05X Img %06X Cols %03d`,
-                    texEntryIdx, clutIndex, imageIndex, width, height, clutMeta.offset, imageMeta.offset, clutMeta.colorCount);
+
+                let typeStr = '';
+                switch (type) {
+                    case TextureType.Diffuse: typeStr = 'Dif'; break;
+                    case TextureType.Ambient: typeStr = 'Amb'; break;
+                    case TextureType.Unk: typeStr = 'Unk'; break;
+                }
+
+                const name = sprintf(`Id %03d-%03d-%03d Res %04dx%04d Clt %05X Img %06X Cols %03d Type %s`,
+                    texEntryIdx, clutIndex, imageIndex, width, height, clutMeta.offset, imageMeta.offset, clutMeta.colorCount, typeStr);
                 const texture = new Data.Texture(paletteBuf, imageBuf, width, height, clutMeta.colorCount, clutMeta.colorSize, name);
 
                 switch (type) {
@@ -279,13 +289,39 @@ class Sly1LevelSceneDesc implements SceneDesc {
 
         let addTexToViewer = async (tex: (Data.Texture | null)) => {
             if (tex)
-                renderer.textureHolder.viewerTextures.push(await tex.toCanvas());
+                renderer.textureHolder.viewerTextures.push(tex.toCanvas());
         };
 
         for (let i = 0; i < this.texturesDiffuse.length; i++) {
             addTexToViewer(this.texturesDiffuse[i]);
             addTexToViewer(this.texturesAmbient[i]);
             addTexToViewer(this.texturesUnk[i]);
+        }
+
+        if (Settings.TEXTURES_EXPORT) {
+            let zipFileEntries: ZipFileEntry[] = [];
+
+            const dumpTextures = async (textures: (Data.Texture | null)[]) => {
+                await Promise.all(textures.filter((texture) => texture !== null).map(async (texture) => {
+                    const surface = texture!.toCanvas().surfaces[0];
+                    const blob: (Blob | null) = await new Promise((resolve, reject) => {
+                        surface.toBlob((blob: Blob | null) => blob !== null ? resolve(blob) : reject(null));
+                    });
+                    if (blob) {
+                        const data = await blob.arrayBuffer();
+                        zipFileEntries.push({ filename: texture!.name + '.png', data: new ArrayBufferSlice(data) });
+                    }
+                }));
+            };
+
+            await dumpTextures(this.texturesDiffuse);
+            await dumpTextures(this.texturesAmbient);
+            await dumpTextures(this.texturesUnk);
+
+            console.log(zipFileEntries);
+
+            const zipFile = makeZipFile(zipFileEntries);
+            downloadBuffer(`${this.id}_textures.zip`, zipFile);
         }
 
         return renderer;

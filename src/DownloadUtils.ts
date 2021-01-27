@@ -34,9 +34,11 @@ export function downloadBuffer(filename: string, buffer: ArrayBufferLike, type: 
 export function downloadCanvasAsPng(canvas: HTMLCanvasElement, filename: string = 'canvas.png'): void {
     let downloadLink = document.createElement('a');
     downloadLink.setAttribute('download', filename);
-    canvas.toBlob(function(blob) {
-    let url = URL.createObjectURL(blob);
-    downloadLink.setAttribute('href', url);
-    downloadLink.click();
+    canvas.toBlob(function (blob: (Blob | null)) {
+        if (blob) {
+            let url = URL.createObjectURL(blob);
+            downloadLink.setAttribute('href', url);
+            downloadLink.click();
+        }
     });
 }
