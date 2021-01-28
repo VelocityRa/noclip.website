@@ -152,7 +152,7 @@ class Sly1LevelSceneDesc implements SceneDesc {
 
                 const name = sprintf(`Id %03d-%03d-%03d Res %04dx%04d Clt %05X Img %06X Cols %03d Type %s`,
                     texEntryIdx, clutIndex, imageIndex, width, height, clutMeta.offset, imageMeta.offset, clutMeta.colorCount, typeStr);
-                const texture = new Data.Texture(paletteBuf, imageBuf, width, height, clutMeta.colorCount, clutMeta.colorSize, name);
+                const texture = new Data.Texture(texEntryIdx, paletteBuf, imageBuf, width, height, clutMeta.colorCount, clutMeta.colorSize, name);
 
                 switch (type) {
                     case TextureType.Diffuse:
@@ -222,7 +222,7 @@ class Sly1LevelSceneDesc implements SceneDesc {
             // export to .obj
 
             if (Settings.MESH_EXPORT) {
-                let obj_str = "";
+                let obj_str = `mtllib ${this.id}.mtl\n`;
 
                 let face_idx_base = 1;
 
@@ -263,7 +263,12 @@ class Sly1LevelSceneDesc implements SceneDesc {
                                 obj_str += `vt ${texCoord[0]} ${texCoord[1]}\n`;
                             }
 
-                            obj_str += `s off\n`;
+                            //obj_str += `s off\n`;
+                            if (chunk.szme)
+                                obj_str += `usemtl ${chunk.szme!.texIndex}\n`
+                            else
+                                obj_str += `usemtl empty\n`;
+
                             for (let i = 0; i < chunk.trianglesIndices.length; i += 3) {
                                 const f0 = face_idx_base + chunk.trianglesIndices[i + 0];
                                 const f1 = face_idx_base + chunk.trianglesIndices[i + 1];
@@ -279,9 +284,21 @@ class Sly1LevelSceneDesc implements SceneDesc {
                         chunk_idx = 0;
                         mesh_idx++;
                     }
-
-                    downloadText(`${this.id}.obj`, obj_str);
                 }
+
+                downloadText(`${this.id}.obj`, obj_str);
+
+
+                let mat_str = 'newmtl empty\n';
+
+                for (let texture of this.texturesDiffuse) {
+                    if (texture) {
+                        mat_str += `newmtl ${texture.texEntryIdx}\n`;
+                        mat_str += `map_Kd ${this.id}_textures/${texture.name}.png\n`;
+                    }
+                }
+
+                downloadText(`${this.id}.mtl`, mat_str);
             }
         }
 

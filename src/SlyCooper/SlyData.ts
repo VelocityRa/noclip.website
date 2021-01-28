@@ -136,7 +136,7 @@ function getCsm1ClutIndices(): Uint8Array {
 }
 
 export class Texture {
-    public texels_rgba: Uint8Array;
+    public texelsRgba: Uint8Array;
     public viewerTexture: Viewer.Texture[] = [];
 
     // Calculated via a heuristic (check if texture palette contains non-opaque texels)
@@ -146,26 +146,36 @@ export class Texture {
 
     private canvasTex: (Viewer.Texture | null) = null;
 
-    constructor(paletteBuf: ArrayBufferSlice, imageBuf: ArrayBufferSlice,
+    constructor(public texEntryIdx: number, paletteBuf: ArrayBufferSlice, imageBuf: ArrayBufferSlice,
         public width: number, public height: number, colorCount: number, colorSize: number, public name: string = "N/A") {
 
-        this.texels_rgba = new Uint8Array(width * height * 4);
+        this.texelsRgba = new Uint8Array(width * height * 4);
 
         let texels_slice = imageBuf.createTypedArray(Uint8Array);
         let palette_slice = paletteBuf.createTypedArray(Uint8Array);
 
         for (let i of range_end(0, width * height)) {
             const idx = Texture.csm1ClutIndices[texels_slice[i]] * 4;
-            const offs = i * 4;
 
-            this.texels_rgba[offs + 0] = palette_slice[idx + 0];
-            this.texels_rgba[offs + 1] = palette_slice[idx + 1];
-            this.texels_rgba[offs + 2] = palette_slice[idx + 2];
-            this.texels_rgba[offs + 3] = palette_slice[idx + 3];
+            let offs: number;
+            if (Settings.MESH_EXPORT) {
+                // todo this is bad
+                const x = i % width;
+                const y = Math.floor(i / width);
+                const inv_y = height - y - 1; //(-(y - (width / 2))) + width / 2 - 1;
+                offs = (inv_y * width + x) * 4;
+            } else {
+                offs = i * 4;
+            }
+
+            this.texelsRgba[offs + 0] = palette_slice[idx + 0];
+            this.texelsRgba[offs + 1] = palette_slice[idx + 1];
+            this.texelsRgba[offs + 2] = palette_slice[idx + 2];
+            this.texelsRgba[offs + 3] = palette_slice[idx + 3];
         }
 
-        for (let i = 0; i < this.texels_rgba.byteLength; i += 4) {
-            if (this.texels_rgba[i + 3] != 0x80) {
+        for (let i = 0; i < this.texelsRgba.byteLength; i += 4) {
+            if (this.texelsRgba[i + 3] != 0x80) {
                 this.isFullyOpaque = false;
                 break;
             }
@@ -187,7 +197,7 @@ export class Texture {
 
         // Shaders double the texture alpha, do that here too to get correct output in the viewer
 
-        const texelsDoubleAlpha = new ArrayBufferSlice(this.texels_rgba.buffer).copyToBuffer();
+        const texelsDoubleAlpha = new ArrayBufferSlice(this.texelsRgba.buffer).copyToBuffer();
         const texelsDoubleAlphaU8 = new ArrayBufferSlice(texelsDoubleAlpha).createTypedArray(Uint8Array)
 
         for (let i = 0; i < texelsDoubleAlphaU8.byteLength; i += 4)
