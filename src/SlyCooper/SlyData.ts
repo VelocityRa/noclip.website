@@ -314,6 +314,7 @@ export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
 export class MeshContainer {
     public meshes: Mesh[] = [];
     public meshInstances: Mesh[] = [];
+    public meshInstancesMap = new Map<number, Mesh[]>();
 
     public field0x40: number;
 
@@ -337,6 +338,19 @@ export class MeshContainer {
         }
 
         // TODO: flags2 etc
+
+        for (let meshInstance of this.meshInstances) {
+            const instanceMeshIndex = meshInstance.instanceMeshIndex;
+
+            let meshInstances: Mesh[];
+            if (this.meshInstancesMap.has(instanceMeshIndex))
+                meshInstances = this.meshInstancesMap.get(instanceMeshIndex)!;
+            else
+                meshInstances = [];
+
+            meshInstances.push(meshInstance);
+            this.meshInstancesMap.set(instanceMeshIndex, meshInstances);
+        }
     }
 }
 

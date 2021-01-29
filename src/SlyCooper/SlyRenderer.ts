@@ -218,22 +218,9 @@ export class SlyRenderer implements Viewer.SceneGfx {
         const gfxCache = this.renderHelper.getCache();
 
         for (let meshContainer of meshContainers) {
-            let meshInstancesMap = new Map<number, Data.Mesh[]>();
-
-            for (let meshInstance of meshContainer.meshInstances) {
-                const instanceMeshIndex = meshInstance.instanceMeshIndex;
-
-                let meshInstances: Data.Mesh[];
-                if (meshInstancesMap.has(instanceMeshIndex))
-                    meshInstances = meshInstancesMap.get(instanceMeshIndex)!;
-                else
-                    meshInstances = [];
-
-                meshInstances.push(meshInstance);
-                meshInstancesMap.set(instanceMeshIndex, meshInstances);
-            }
-
             for (let mesh of meshContainer.meshes) {
+                const meshInstances = meshContainer.meshInstancesMap.get(mesh.meshIndex);
+
                 for (let meshChunk of mesh.chunks) {
                     const geometryData = new GeometryData(device, gfxCache, meshChunk);
 
@@ -265,7 +252,6 @@ export class SlyRenderer implements Viewer.SceneGfx {
                         textureEntry = textureEntries[texIndex];
                     }
 
-                    const meshInstances = meshInstancesMap.get(mesh.meshIndex);
                     const meshRenderer = new SlyMeshRenderer(textureData, geometryData, meshChunk, textureEntry, isFullyOpaque, meshInstances);
                     meshRenderer.setVisible(isDefaultFlag(meshChunk.flags));
                     this.meshRenderers.push(meshRenderer);
@@ -632,7 +618,7 @@ class TextureData {
         // console.log(`makeGfxTexture: size ${texture.width}x${texture.height}`);
         const gfxTexture = device.createTexture(makeTextureDescriptor2D(GfxFormat.U8_RGBA_NORM, texture.width, texture.height, 1));
         // console.log(gfxTexture);
-        hostAccessPass.uploadTextureData(gfxTexture, 0, [texture.texels_rgba]);
+        hostAccessPass.uploadTextureData(gfxTexture, 0, [texture.texelsRgba]);
         device.submitPass(hostAccessPass);
         return gfxTexture;
     }
@@ -691,7 +677,7 @@ export class SlyMeshRenderer {
 
     private rotX: mat4 = mat4.create();
 
-    private instanceMatrices: mat4[] = [mat4.create()];
+    private instanceMatrices: mat4[] = [ mat4.create() ];
 
     constructor(
         textureData: (TextureData | null)[],
@@ -699,7 +685,7 @@ export class SlyMeshRenderer {
         public meshChunk: Data.MeshChunk,
         textureEntry: (Data.TextureEntry | null),
         private isFullyOpaque: boolean,
-        meshInstances: Data.Mesh[] | undefined) {
+        meshInstances: (Data.Mesh[] | undefined)) {
 
         this.name = meshChunk.name;
 
