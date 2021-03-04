@@ -93,6 +93,7 @@ import { WebXRContext } from './WebXR';
 import { debugJunk } from './DebugJunk';
 
 const sceneGroups = [
+    /*
     "Wii",
     Scenes_MarioKartWii.sceneGroup,
     Scenes_KirbysReturnToDreamLand.sceneGroup,
@@ -141,8 +142,10 @@ const sceneGroups = [
     Scenes_KatamariDamacy.sceneGroup,
     Scenes_KingdomHearts.sceneGroup,
     Scenes_KingdomHeartsIIFinalMix.sceneGroup,
+    */
     "PlayStation 3",
     Scenes_Sly1.sceneGroup,
+    /*
     "Xbox",
     Scenes_SpongeBobBFBB.sceneGroup,
     "PC",
@@ -172,6 +175,7 @@ const sceneGroups = [
     Scenes_TheWitness.sceneGroup,
     Scenes_WiiBanner.sceneGroup,
     Scenes_Zelda_OcarinaOfTime_Beta.sceneGroup,
+    */
 ];
 
 function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
