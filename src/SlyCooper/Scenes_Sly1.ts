@@ -2,7 +2,7 @@ import ArrayBufferSlice from '../ArrayBufferSlice';
 import { mat4, vec2, vec3 } from 'gl-matrix';
 import { SceneGroup, SceneDesc, SceneGfx, ViewerRenderInput } from "../viewer";
 import * as Viewer from "../viewer";
-import { GfxDevice, GfxRenderPass, GfxHostAccessPass, GfxBindingLayoutDescriptor, GfxProgram } from "../gfx/platform/GfxPlatform";
+import { GfxDevice } from "../gfx/platform/GfxPlatform";
 import { SceneContext } from "../SceneBase";
 import { IS_DEVELOPMENT } from "../BuildVersion";
 import { assert, hexzero, hexzero0x, leftPad } from '../util';
