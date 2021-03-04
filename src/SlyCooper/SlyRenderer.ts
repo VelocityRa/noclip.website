@@ -1,11 +1,11 @@
 import * as Viewer from '../viewer';
 import * as UI from '../ui';
 import { FakeTextureHolder } from '../TextureHolder';
-import { GfxDevice, GfxRenderPass, GfxBindingLayoutDescriptor, GfxHostAccessPass, GfxMegaStateDescriptor, GfxCullMode, GfxFrontFaceMode, GfxBlendMode, GfxBlendFactor, GfxSampler, GfxTexture, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxProgramDescriptorSimple, makeTextureDescriptor2D, GfxColor } from "../gfx/platform/GfxPlatform";
+import { GfxDevice, GfxRenderPass, GfxBindingLayoutDescriptor, GfxMegaStateDescriptor, GfxCullMode, GfxFrontFaceMode, GfxBlendMode, GfxBlendFactor, GfxSampler, GfxTexture, GfxWrapMode, GfxTexFilterMode, GfxMipFilterMode, GfxProgramDescriptorSimple, makeTextureDescriptor2D, GfxColor } from "../gfx/platform/GfxPlatform";
 import { preprocessProgramObj_GLSL, DefineMap } from "../gfx/shaderc/GfxShaderCompiler";
-import { GfxRenderHelper } from "../gfx/render/GfxRenderGraph";
-import { BasicRenderTarget, opaqueBlackFullClearRenderPassDescriptor } from "../gfx/helpers/RenderTargetHelpers";
-import { GfxRenderInstManager, GfxRendererLayer, makeSortKey, makeSortKeyOpaque } from "../gfx/render/GfxRenderer";
+import { pushAntialiasingPostProcessPass, opaqueBlackFullClearRenderPassDescriptor } from "../gfx/helpers/RenderGraphHelpers";
+import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper';
+import { GfxRenderInstManager, GfxRendererLayer, makeSortKey, makeSortKeyOpaque } from "../gfx/render/GfxRenderInstManager";
 import { fillVec2v, fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v, fillColor } from "../gfx/helpers/UniformBufferHelpers";
 import { mat4, vec3, vec2, vec4 } from "gl-matrix";
 import { computeViewMatrix, CameraController, computeViewMatrixSkybox } from "../Camera";
@@ -21,6 +21,7 @@ import { Color, Magenta, colorToCSS, Red, Green, Blue, Cyan } from "../Color";
 import { GfxBuffer, GfxInputLayout, GfxInputState, GfxBufferUsage, GfxVertexAttributeDescriptor, GfxFormat, GfxInputLayoutBufferDescriptor, GfxVertexBufferFrequency } from "../gfx/platform/GfxPlatform";
 import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache";
+import { GfxrAttachmentSlot, makeBackbufferDescSimple } from '../gfx/render/GfxRenderGraph';
 
 class SlyRenderHacks {
     disableTextures = false;
@@ -200,7 +201,6 @@ export class SlyRenderer implements Viewer.SceneGfx {
     public textureHolder = new FakeTextureHolder([]);
 
     private program: (GfxProgramDescriptorSimple | null) = null;
-    private renderTarget = new BasicRenderTarget();
     private renderHelper: GfxRenderHelper;
     private modelMatrix: mat4 = mat4.create();
     private meshRenderers: SlyMeshRenderer[] = [];
@@ -261,7 +261,7 @@ export class SlyRenderer implements Viewer.SceneGfx {
         }
     }
 
-    public prepareToRender(device: GfxDevice, hostAccessPass: GfxHostAccessPass, viewerInput: Viewer.ViewerRenderInput, renderInstManager: GfxRenderInstManager) {
+    public prepareToRender(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput, renderInstManager: GfxRenderInstManager) {
         const template = this.renderHelper.pushTemplateRenderInst();
         template.setBindingLayouts(bindingLayouts);
 
@@ -284,19 +284,31 @@ export class SlyRenderer implements Viewer.SceneGfx {
 
         renderInstManager.popTemplateRenderInst();
 
-        this.renderHelper.prepareToRender(device, hostAccessPass);
+        this.renderHelper.prepareToRender(device);
     }
 
-    public render(device: GfxDevice, renderInput: Viewer.ViewerRenderInput): GfxRenderPass {
-        const hostAccessPass = device.createHostAccessPass();
+    public render(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput) {
         const renderInstManager = this.renderHelper.renderInstManager;
+        const builder = this.renderHelper.renderGraph.newGraphBuilder();
 
-        this.prepareToRender(device, hostAccessPass, renderInput, renderInstManager);
-        device.submitPass(hostAccessPass);
+        const mainColorDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.Color0, viewerInput, opaqueBlackFullClearRenderPassDescriptor);
+        const mainDepthDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.DepthStencil, viewerInput, opaqueBlackFullClearRenderPassDescriptor);
 
-        this.renderTarget.setParameters(device, renderInput.backbufferWidth, renderInput.backbufferHeight);
-        const passRenderer = this.renderTarget.createRenderPass(device, renderInput.viewport, opaqueBlackFullClearRenderPassDescriptor);
-        renderInstManager.drawOnPassRenderer(device, passRenderer);
+        const mainColorTargetID = builder.createRenderTargetID(mainColorDesc, 'Main Color');
+        const mainDepthTargetID = builder.createRenderTargetID(mainDepthDesc, 'Main Depth');
+        builder.pushPass((pass) => {
+            pass.setDebugName('Main');
+            pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
+            pass.attachRenderTargetID(GfxrAttachmentSlot.DepthStencil, mainDepthTargetID);
+            pass.exec((passRenderer) => {
+                renderInstManager.drawOnPassRenderer(device, passRenderer);
+            });
+        });
+        pushAntialiasingPostProcessPass(builder, this.renderHelper, viewerInput, mainColorTargetID);
+        builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
+
+        this.prepareToRender(device, viewerInput, renderInstManager);
+        this.renderHelper.renderGraph.execute(device, builder);
         renderInstManager.resetRenderInsts();
 
         if (debugHacks.drawMeshOrigins || debugHacks.drawSzmsPositions || debugHacks.drawSzmePositions) {
@@ -332,7 +344,7 @@ export class SlyRenderer implements Viewer.SceneGfx {
 
         // let aabb = new AABB(-1000, -5000, -1000, 100, 5000, 100);
         // const ctx = getDebugOverlayCanvas2D();
-        // drawWorldSpaceAABB(ctx, renderInput.camera.clipFromWorldMatrix, aabb);
+        // drawWorldSpaceAABB(ctx, viewerInput.camera.clipFromWorldMatrix, aabb);
 
         // const dbgPos = this.meshRenderers[148].meshChunk.szme?.positions!;
         // for (let i = 0; i < dbgPos.length; i += 3) {
@@ -367,8 +379,6 @@ export class SlyRenderer implements Viewer.SceneGfx {
         // }
         // }
         // }
-
-        return passRenderer;
     }
 
     private setTexturesEnabled(enabled: boolean) {
@@ -479,7 +489,6 @@ export class SlyRenderer implements Viewer.SceneGfx {
 
     public destroy(device: GfxDevice): void {
         this.renderHelper.destroy(device);
-        this.renderTarget.destroy(device);
     }
 }
 
@@ -614,12 +623,10 @@ class TextureData {
     public sampler: GfxSampler;
 
     private makeGfxTexture(device: GfxDevice, texture: Data.Texture): GfxTexture {
-        const hostAccessPass = device.createHostAccessPass();
         // console.log(`makeGfxTexture: size ${texture.width}x${texture.height}`);
         const gfxTexture = device.createTexture(makeTextureDescriptor2D(GfxFormat.U8_RGBA_NORM, texture.width, texture.height, 1));
         // console.log(gfxTexture);
-        hostAccessPass.uploadTextureData(gfxTexture, 0, [texture.texelsRgba]);
-        device.submitPass(hostAccessPass);
+        device.uploadTextureData(gfxTexture, 0, [texture.texelsRgba]);
         return gfxTexture;
     }
 
