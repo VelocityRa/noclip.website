@@ -68,6 +68,7 @@ import * as Scenes_TheWitness from './TheWitness/Scenes_TheWitness';
 import * as Scenes_FFX from './FinalFantasyX/scenes';
 import * as Scenes_WiiBanner from './Common/NW4R/lyt/Scenes_WiiBanner';
 import * as Scenes_Sly1 from './SlyCooper/Scenes_Sly1';
+import * as Scenes_Sly2 from './SlyCooper/Scenes_Sly2';
 
 import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops';
 
@@ -145,6 +146,7 @@ const sceneGroups = [
     */
     "PlayStation 3",
     Scenes_Sly1.sceneGroup,
+    Scenes_Sly2.sceneGroup,
     /*
     "Xbox",
     Scenes_SpongeBobBFBB.sceneGroup,
