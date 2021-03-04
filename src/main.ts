@@ -84,6 +84,7 @@ import * as Scenes_Subnautica from './Subnautica/scenes';
 import * as Scenes_Glover from './Glover/scenes';
 import * as Scenes_HalfLife from './GoldSrc/Scenes_HalfLife';
 import * as Scenes_Sly1 from './SlyCooper/Scenes_Sly1';
+import * as Scenes_Sly2 from './SlyCooper/Scenes_Sly2';
 
 import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops';
 
@@ -163,6 +164,7 @@ const sceneGroups = [
     */
     "PlayStation 3",
     Scenes_Sly1.sceneGroup,
+    Scenes_Sly2.sceneGroup,
     /*
     "Xbox",
     Scenes_SpongeBobBFBB.sceneGroup,
