@@ -28,7 +28,9 @@ export class DataStream {
     public readString(size: number): string {
         let view = this.buffer.slice(this.offs, this.offs + size).createTypedArray(Uint8Array);
         let str = this.dec.decode(view);
-        str = str.substr(0, str.indexOf('\0')); // Trim trailing null terminators
+        let nullIdx = str.indexOf('\0');
+        if (nullIdx != -1)
+            str = str.substr(0, nullIdx); // Trim trailing null terminators
         this.offs += size;
         return str;
     }
