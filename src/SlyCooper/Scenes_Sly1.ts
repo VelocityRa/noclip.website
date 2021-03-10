@@ -48,7 +48,7 @@ class Sly1LevelSceneDesc implements SceneDesc {
     public async createScene(device: GfxDevice, context: SceneContext): Promise<SceneGfx> {
         // TODO? Use compressed original files (orig. or zip/etc), or decompressed trimmed files
 
-        const bin = await context.dataFetcher.fetchData(`${pathBase}/${this.id}_W.dec`)
+        const bin = await context.dataFetcher.fetchData(`${pathBase}/${this.id}.slyW.dec`)
 
         console.log(`loaded ${pathBase}/${this.id}_W.dec of size ${bin.byteLength}`);
 
