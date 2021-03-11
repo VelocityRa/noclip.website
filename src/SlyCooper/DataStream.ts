@@ -11,9 +11,11 @@ export class DataStream {
     }
 
     public readUint8(): number { return this.view.getUint8(this.offs++); }
-    public readUint16(): number { const v = this.view.getUint16(this.offs, true); this.offs += 0x02; return v; }
-    public readUint32(): number { const v = this.view.getUint32(this.offs, true); this.offs += 0x04; return v; }
-    public readFloat32(): number { const v = this.view.getFloat32(this.offs, true); this.offs += 0x04; return v; }
+    public readUint16(): number { const v = this.view.getUint16(this.offs, true); this.offs += 2; return v; }
+    public readUint32(): number { const v = this.view.getUint32(this.offs, true); this.offs += 4; return v; }
+    public readFloat32(): number { const v = this.view.getFloat32(this.offs, true); this.offs += 4; return v; }
+    public readFloat64(): number { const v = this.view.getFloat64(this.offs, true); this.offs += 8; return v; }
+    public readVec2(): vec2 { return vec2.fromValues(this.readFloat32(), this.readFloat32()); }
     public readVec3(): vec3 { return vec3.fromValues(this.readFloat32(), this.readFloat32(), this.readFloat32()); }
     public readVec4(): vec4 { return vec4.fromValues(this.readFloat32(), this.readFloat32(), this.readFloat32(), this.readFloat32()); }
     public readMat4(): mat4 {
@@ -41,4 +43,21 @@ export class DataStream {
 
     public align(alignment: number) { this.offs += (-this.offs) & (alignment - 1); }
     public skip(size: number) { this.offs += size; }
+
+    // Shorthands
+
+    public u8(): number { return this.readUint8(); }
+    public u16(): number { return this.readUint16(); }
+    public u32(): number { return this.readUint32(); }
+    public f32(): number { return this.readFloat32(); }
+    public f64(): number { return this.readFloat64(); }
+    public vec3(): vec3 { return this.readVec3(); }
+    public vec4(): vec4 { return this.readVec4(); }
+    public mat4(): mat4 { return this.readMat4(); }
+
+    public str(size: number): string { return this.readString(size); }
+
+    public u8At(offset: number): number { return this.readUint8At(offset); }
+    public u16At(offset: number): number { return this.readUint16At(offset); }
+    public u32At(offset: number): number { return this.readUint32At(offset); }
 }

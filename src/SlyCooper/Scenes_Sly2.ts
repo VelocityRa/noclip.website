@@ -5,13 +5,13 @@ import * as Viewer from "../viewer";
 import { GfxDevice } from "../gfx/platform/GfxPlatform";
 import { SceneContext } from "../SceneBase";
 import { IS_DEVELOPMENT } from "../BuildVersion";
-import { assert, hexzero, hexzero0x, leftPad } from '../util';
+import { assert, hexzero, hexzero0x, leftPad, spacePad } from '../util';
 import { NamedArrayBufferSlice } from "../DataFetcher";
 import { downloadCanvasAsPng, downloadText } from "../DownloadUtils";
 import { range, range_end } from '../MathHelpers';
 import { downloadBuffer } from '../DownloadUtils';
 import { makeZipFile, ZipFileEntry } from '../ZipFile';
-import { SlyRenderer } from './SlyRenderer';
+import { Sly2Renderer } from './Sly2Renderer';
 import * as Settings from './SlyConstants';
 import * as Data from './SlyData';
 import { DataStream } from "./DataStream";
@@ -19,24 +19,26 @@ import { sprintf } from "./sprintf";
 
 const pathBase = `Sly2`;
 
+let enc = new TextEncoder();
+
 // TODO: move to other file
 interface ObjectEntry {
     name: string;
     type: string; // char
     count: number;
 }
-function parseObjectEntries(stream: DataStream): ObjectEntry[] {
+function parseObjectEntries(s: DataStream): ObjectEntry[] {
     let objects: ObjectEntry[] = [];
 
-    let objectCount = stream.readUint16();
+    let objectCount = s.u16();
     for (let i = 0; i < objectCount; ++i) {
-        let resourceDescriptorStr = stream.readString(0x40);
+        let resourceDescriptorStr = s.readString(0x40);
         let type = resourceDescriptorStr[3];
         let name = resourceDescriptorStr.substr(4);
 
-        stream.skip(4 * 4);
+        s.skip(4 * 4);
 
-        let count = stream.readUint32();
+        let count = s.u32();
 
         objects.push({ name, type, count });
     }
@@ -44,14 +46,300 @@ function parseObjectEntries(stream: DataStream): ObjectEntry[] {
     return objects;
 }
 
-interface Object_ {
+class SzmeChunk {
+    private offset: number;
+    private flags: number;
+
+    constructor(s: DataStream, u2Coumt: number, i0: number) {
+        this.offset = s.offs;
+
+        if (s.readUint32() != Mesh.szmeMagic)
+            throw new Error(`bad SZME magic at ${hexzero0x(this.offset)}`);
+
+        // todo
+
+    }
+
 }
 
-let enc = new TextEncoder();
+interface MeshChunk {
+    positions: Float32Array; // vec3
+    normals: Float32Array;  // vec3
+    texCoords: Float32Array;  // vec2
+    vertexColor: Uint32Array; // RGBA (?)
+    vertexColorFloats: Float32Array;   // vec4
+
+    trianglesIndices: Uint16Array[];
+    unkIndices: Uint16Array[];
+
+    szme: SzmeChunk;
+
+    name: string; // for debugging
+}
+
+class Mesh {
+    static readonly szmsMagic = 0x534D5A53; // "SZMS"
+    static readonly szmeMagic = 0x454d5a53; // "SZME"
+    static readonly szmsVersion = 4;
+
+    private type: number;
+
+    private chunks: MeshChunk[] = [];
+
+    public u0: number;
+    public u2Count: number;
+
+    constructor(s: DataStream, i0: number) {
+        this.u0 = s.u8();
+
+        if (this.u0 == 0) {
+            this.type = s.u8();
+            this.u2Count = s.u16();
+            s.skip(2 + 1);
+            let u4 = s.f32();
+            let u5 = s.f32();
+            let u6 = s.u32();
+            s.skip(1 + 1);
+
+            if (i0 == 0) {
+                let u9 = s.vec3();
+                let u10 = s.f32();
+                let u11 = s.u32();
+                let u12 = s.f32();
+            }
+
+            if (this.type == 0) {
+                // Read SZMS header
+
+                if (s.u32() != Mesh.szmsMagic)
+                throw new Error(`[${hexzero0x(s.offs)}] bad SZMS magic`);
+
+                if (s.u32() != 0x4)
+                    throw new Error(`[${hexzero0x(s.offs)}] unsupported version`);
+
+
+                const totalSize = s.u32();
+
+                // Read mesh header
+
+                const startOffs = s.offs;
+
+                const unkMhdr0x00 = s.u32();
+                const unkMhdr0x04 = s.u16();
+                const szmsChunkCount = s.u16();
+
+                let meshOffsets: number[] = [];
+
+                for (let i of range_end(0, szmsChunkCount)) {
+                    meshOffsets.push(s.u32());
+                }
+
+                // console.log(sprintf('SZMS #%04d %05X %08X %s', index, totalSize, offset, meshOffsets));
+
+                for (let meshOffs of meshOffsets) {
+                    s.offs = startOffs + meshOffs;
+
+                    // Read vertex header
+
+                    const unkVtxHdr0x00 = s.u32();
+                    const vertexCount = s.u16();
+                    const unkVtxHdrCount = s.u16();
+                    const vertexDataOffset = s.u32();
+                    const indexHeaderOffset = s.u32();
+
+                    const vertexDataSize = indexHeaderOffset - vertexDataOffset;
+
+                    s.offs = startOffs + vertexDataOffset;
+
+                    // Read vertex data
+
+                    let positions = new Float32Array(vertexCount * 3);
+                    let normals = new Float32Array(vertexCount * 3)
+                    let texCoords = new Float32Array(vertexCount * 2);
+                    let vertexColor = new Uint32Array(vertexCount);
+                    let vertexColorFloats = new Float32Array(vertexCount * 4);
+
+                    for (let i = 0; i < vertexCount; ++i) {
+                        positions[i * 3 + 0] = s.f32();
+                        positions[i * 3 + 1] = s.f32();
+                        positions[i * 3 + 2] = s.f32();
+
+                        normals[i * 3 + 0] = s.f32();
+                        normals[i * 3 + 1] = s.f32();
+                        normals[i * 3 + 2] = s.f32();
+
+                        texCoords[i * 2 + 0] = s.f32();
+                        texCoords[i * 2 + 1] = s.f32();
+
+                        vertexColor[i] = s.u32();
+
+                        s.offs -= 4;
+                        vertexColorFloats[i * 4 + 0] = s.u8() / 255;
+                        vertexColorFloats[i * 4 + 1] = s.u8() / 255;
+                        vertexColorFloats[i * 4 + 2] = s.u8() / 255;
+                        vertexColorFloats[i * 4 + 3] = s.u8() / 255;
+                    }
+
+                    s.offs = startOffs + indexHeaderOffset;
+
+                    let trianglesIndices: Uint16Array[] = [];
+                    let unkIndices: Uint16Array[] = [];
+                    for (let j = 0; j < 2; ++j) {
+                        const triangleCount = s.u16() * 3;
+                        const indexCount = s.u16();
+                        const indexDataOffs1 = s.u32();
+                        const indexDataOffs2 = s.u32();
+
+                        // Read index data
+
+                        // Read triangle data
+
+                        s.offs = startOffs + indexDataOffs1;
+                        trianglesIndices.push(new Uint16Array(triangleCount));
+                        for (let i = 0; i < triangleCount; ++i) {
+                            trianglesIndices[j][i] = s.u16();
+                        }
+
+                        // Read index data
+
+                        s.offs = startOffs + indexDataOffs2;
+                        unkIndices.push(new Uint16Array(indexCount));
+                        for (let i of range_end(0, indexCount)) {
+                            unkIndices[j][i] = s.u16();
+                        }
+                    }
+
+                    let meshAddr = startOffs - 2;
+                    let submeshAddr = startOffs + meshOffs;
+                    let submeshCount = spacePad(meshOffsets.length.toString(), 2);
+                    let szme = new SzmeChunk(s, this.u2Count, i0);
+
+                    let name = `SZMS ${hexzero(meshAddr, 6)} ${submeshCount} | ${hexzero(submeshAddr)}`;
+
+                    this.chunks.push({positions, normals, texCoords, vertexColor, vertexColorFloats, trianglesIndices, unkIndices, szme, name});
+                }
+            } else {
+                throw `Unsupported type ${this.type}`;
+            }
+
+            for (let i = 0; i < this.u2Count; ++i) {
+                // TODO
+            }
+        } else {
+            s.skip(this.u0 * 2);
+            let u2IgnCount= s.u32();
+            s.skip(u2IgnCount);
+        }
+    }
+}
+
+class MeshContainer {
+    public meshes: Mesh[] = [];
+    public offset: number;
+
+    constructor(s: DataStream) {
+        this.offset = s.offs;
+
+        let c2Count = s.u32();
+        if (c2Count > 0) {
+            let c3 = s.u16();
+            let c4 = s.u16();
+            let c5 = s.u32();
+            let flags = s.u8();
+
+            if ((flags & 0x1) == 0) {
+                if ((flags & 0x2) != 0) {
+                    s.skip(4 + 4);
+                }
+            } else {
+                s.skip(4);
+            }
+            if ((flags & 0x4) != 0) {
+                s.skip(1);
+            }
+            if ((flags & 0x8) != 0) {
+                s.skip(1 + 4 + 3 * 4 * 3 + 1 + 1 + 4);
+            }
+            if ((flags & 0x10) != 0) {
+                s.skip(1+4+4);
+            }
+            if ((flags & 0x20) != 0) {
+                s.skip(3*4);
+            }
+            if (c4 < 0x10) {
+                let uVar8 = 1 << (c4 & 0x7F);
+                if ((uVar8 & 0xA001) == 0) {
+                    if ((uVar8 & 0x4100) == 0) {
+                        s.skip(3 * 4 * 4);
+                    } else{
+                        s.skip(2);
+                    }
+                } else {
+                    s.skip(3 * 4 * 4);
+                }
+            } else {
+                s.skip(3 * 4 * 4);
+            }
+        }
+
+        let caCount = s.u8();
+        const caSize = 2 + 2 + 2 + 3 * 4 + 2 + 3 * 4;
+        s.skip(caCount * caSize);
+
+        let cbCount = s.u8();
+        const cbSize = 2 + 2 + 1 + 1;
+        s.skip(cbCount * cbSize);
+
+        let ccCount = s.u8();
+        for (let i = 0; i < ccCount; ++i) {
+            s.skip(1 + 4 + 4 + 4 + 4 + 3 * 4 + 3 * 4);
+            let cc7Count = s.u8();
+            s.skip(cc7Count * 2);
+        }
+
+        s.skip(2 + 2 + 2 + 4);
+
+        let i0 = s.u8();
+        let i1 = s.vec3();
+        let i2 = s.f32();
+        let i3Count = s.u8();
+        s.skip(i3Count * (2 + 0x20));
+        s.skip(1);
+
+        let meshCount = s.u16();
+        let meshIndex = 0;
+        while (meshIndex < meshCount) {
+            let mesh = new Mesh(s, i0);
+
+            if (mesh.u0 == 0)
+                meshIndex += mesh.u2Count;
+            else
+                meshIndex--;
+
+            meshIndex++;
+            this.meshes.push(mesh);
+        }
+
+        // TODO: mesh_data_unk3
+        // TODO: c6Count, c9, etc
+    }
+}
+
+class Texture {
+    constructor(stream: DataStream, private dataSize: number) {
+        // TODO
+    }
+}
+
+class LevelObject {
+    public meshContainers: MeshContainer[] = [];
+    public textures: Texture[] = [];
+}
 
 // function parseObject(stream: DataStream, scriptOffsets: (number[] | null)): Object {
 // }
 
+// TODO: move elsewhere
 export const SCRIPTS_EXPORT = false;
 
 class Sly2LevelSceneDesc implements SceneDesc {
@@ -68,11 +356,11 @@ class Sly2LevelSceneDesc implements SceneDesc {
         // TODO? Use compressed original files (orig. or zip/etc), or decompressed trimmed files
 
         const bin = await context.dataFetcher.fetchData(`${pathBase}/${this.id}.slyZ.dec`)
-        let stream = new DataStream(bin);
+        let s = new DataStream(bin);
 
         console.log(`loaded ${pathBase}/${this.id} of size ${bin.byteLength}`);
 
-        let objectEntries = parseObjectEntries(stream);
+        let objectEntries = parseObjectEntries(s);
         console.log(objectEntries);
 
         // TODO: refactor to func
@@ -82,28 +370,30 @@ class Sly2LevelSceneDesc implements SceneDesc {
         let scriptIndex = 0;
         let textureIndex = 0;
         let meshcontIndex = 0;
+
+        let objects: LevelObject[] = [];
+
         for (let i = 0; i < objectEntries.length; ++i) {
             let objectEntry = objectEntries[i];
             let objectOffset = this.objectOffsets[i];
 
-            stream.offs = objectOffset;
+            s.offs = objectOffset;
 
-            let textureSize = stream.readUint32();
-            stream.skip(4);
-            let hasScripts = (stream.readUint32() != 0);
+            let textureSize = s.u32();
+            s.skip(4);
+            let hasScripts = (s.u32() != 0);
 
             if (SCRIPTS_EXPORT && hasScripts) {
-                // let prevOffs = stream.offs;
                 while (scriptIndex < this.scriptOffsets.length) {
                     let scriptOffset = this.scriptOffsets[scriptIndex];
 
                     if (i >= objectEntries.length || scriptOffset > this.objectOffsets[i + 1])
                         break;
 
-                    stream.offs = scriptOffset;
-                    let str0 = stream.readString(stream.readUint16());
-                    let str1 = stream.readString(stream.readUint16());
-                    let str2 = stream.readString(stream.readUint16());
+                    s.offs = scriptOffset;
+                    let str0 = s.readString(s.u16());
+                    let str1 = s.readString(s.u16());
+                    let str2 = s.readString(s.u16());
 
                     if (str1 !== "")
                         console.info(`non0 str1: ${str1}`);
@@ -115,10 +405,11 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
                     ++scriptIndex;
                 }
-                // stream.offs = prevOffs;
             }
 
-            let obj_log = `${objectEntry.name} | TEX `;
+            let object = new LevelObject();
+
+            let obj_log = `${leftPad(objectEntry.name, 32, ' ')} | TEX `;
             let hasTex = false;
             while (textureIndex < this.textureOffsets.length) {
                 let textureOffset = this.textureOffsets[textureIndex];
@@ -126,7 +417,8 @@ class Sly2LevelSceneDesc implements SceneDesc {
                 if (i >= objectEntries.length || textureOffset > this.objectOffsets[i + 1])
                     break;
 
-                stream.offs = textureOffset;
+                s.offs = textureOffset;
+                object.textures.push(new Texture(s, textureSize));
 
                 obj_log += `${hexzero(textureOffset)}, `
                 hasTex = true;
@@ -144,7 +436,13 @@ class Sly2LevelSceneDesc implements SceneDesc {
                 if (i >= objectEntries.length || meshcontOffset > this.objectOffsets[i + 1])
                     break;
 
-                stream.offs = meshcontOffset;
+                s.offs = meshcontOffset;
+                try {
+                    let meshContainer = new MeshContainer(s)
+                    object.meshContainers.push(meshContainer);
+                } catch (error) {
+                    console.error(`mcont @ ${hexzero0x(meshcontOffset)} id ${meshcontIndex}: ${error}`);
+                }
 
                 obj_log += `${hexzero(meshcontOffset)}, `
                 hasMeshcont = true;
@@ -156,10 +454,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
             console.log(obj_log);
 
-            // todo: meshes
-            // use similar approach to scripts to determin meshcont's object
-
-            // todo: textures
+            objects.push(object);
         }
 
         if (SCRIPTS_EXPORT) {
@@ -167,7 +462,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
             downloadBuffer(`${this.id}_scripts.zip`, zipFile);
         }
 
-        const renderer = new SlyRenderer(device, [], [], [], [], []);
+        const renderer = new Sly2Renderer(device);
         return renderer;
     }
 }
