@@ -441,6 +441,8 @@ class Texture {
 }
 
 class LevelObject {
+    public offset: number;
+    public header: ObjectEntry;
     public meshContainers: MeshContainer[] = [];
     public textures: Texture[] = [];
 }
@@ -451,7 +453,7 @@ class LevelObject {
 // TODO: move elsewhere
 export const SCRIPTS_EXPORT = false;
 export const MESH_EXPORT = true;
-export const SEPARATE_OBJECT_SUBMESHES = true;
+export const SEPARATE_OBJECT_SUBMESHES = false;
 export const MESH_SCALE = 1 / 1000.0;
 
 class Sly2LevelSceneDesc implements SceneDesc {
@@ -520,6 +522,8 @@ class Sly2LevelSceneDesc implements SceneDesc {
             }
 
             let object = new LevelObject();
+            object.header = objectEntry;
+            object.offset = objectOffset;
 
             let obj_log = `${leftPad(objectEntry.name, 32, ' ')} | TEX `;
             let hasTex = false;
@@ -553,7 +557,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
                     let meshContainer = new MeshContainer(s, meshContIndex)
                     object.meshContainers.push(meshContainer);
                 } catch (error) {
-                    console.error(`mcont @ ${hexzero0x(meshcontOffset)} id ${meshContIndex}: ${error}`);
+                    console.error(`obj \'${objectEntry.name}\' mcont @ ${hexzero0x(meshcontOffset)} id ${meshContIndex}: ${error}`);
                 }
 
                 obj_log += `${hexzero(meshcontOffset)}, `
@@ -586,14 +590,14 @@ class Sly2LevelSceneDesc implements SceneDesc {
                     let chunkIdx = 0;
 
                     for (let mesh of meshContainer.meshes) {
-                        if (!SEPARATE_OBJECT_SUBMESHES) {
-                            obj_str += `o ${mesh.container.containerIndex}_${mesh.meshIndex}_${chunkTotalIdx}_${hexzero0x(mesh.offset)}\n`;
-                        }
+                        if (!SEPARATE_OBJECT_SUBMESHES)
+                            obj_str += `o ${object.header.name}_${mesh.container.containerIndex}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero0x(mesh.offset)}\n`;
 
                         // TODO: instances
 
                         for (let chunk of mesh.chunks) {
-                            obj_str += `o ${mesh.container.containerIndex}_${mesh.meshIndex}_${chunkIdx}_${chunkTotalIdx}_${hexzero0x(mesh.offset)}\n`;
+                            if (SEPARATE_OBJECT_SUBMESHES)
+                                obj_str += `o ${mesh.container.containerIndex}_${mesh.meshIndex}_${chunkIdx}_${chunkTotalIdx}_${hexzero0x(mesh.offset)}\n`;
 
                             for (let i = 0; i < chunk.positions.length; i += 3) {
                                 const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
