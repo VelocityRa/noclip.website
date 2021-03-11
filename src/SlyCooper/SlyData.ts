@@ -327,7 +327,6 @@ export class MeshContainer {
 export class Mesh {
     static readonly szmsMagic = 0x534D5A53; // "SZMS"
     static readonly szmeMagic = 0x454d5a53; // "SZME"
-
     static readonly szmsVersion = 4;
 
     public flags: number;
