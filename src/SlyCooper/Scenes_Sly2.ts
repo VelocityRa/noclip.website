@@ -315,9 +315,35 @@ class Mesh {
 
                     this.chunks.push({
                         positions, normals, texCoords, vertexColor, vertexColorFloats,
-                        trianglesIndices1, unkIndices1, trianglesIndices2, unkIndices2, name });
+                        trianglesIndices1, unkIndices1, trianglesIndices2, unkIndices2, name
+                    });
                 }
                 this.szme = new Szme(s, this.u2Count, i0);
+            } else if (this.type == 3) {
+                let p0Count = s.u8();
+                s.skip(p0Count * (4 + 4));
+
+                let p3Count = s.u16();
+                for (let i = 0; i < p3Count; ++i) {
+                    let p4 = s.u16();
+                    let p5Count = s.u8();
+                    let p6Count = s.u8();
+                    s.skip(p6Count * 3 * 4);
+
+                    if (p0Count > 0) {
+                        s.skip(4);
+
+                        let p0CountN = p0Count;
+                        if (p0Count > 3)
+                            p0CountN = 4;
+
+                        s.skip(p0CountN * p6Count);
+                    }
+                    s.skip(p5Count);
+
+                    let p9Count = (p5Count + 0x1F) >> 5;
+                    s.skip(p9Count * 4);
+                }
             } else {
                 throw `Unsupported type ${this.type}`;
             }
@@ -416,6 +442,7 @@ class MeshContainer {
         s.skip(1);
 
         let meshCount = s.u16();
+        console.log(`meshCount: ${meshCount}`);
         let meshIndex = 0;
         while (meshIndex < meshCount) {
             let mesh = new Mesh(s,this, meshIndex,i0);
@@ -525,7 +552,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
             object.header = objectEntry;
             object.offset = objectOffset;
 
-            let obj_log = `${leftPad(objectEntry.name, 32, ' ')} | TEX `;
+            let obj_log = `${leftPad(objectEntry.name, 32, ' ')} #${leftPad(`${objectEntry.count}`, 2)} | TEX `;
             let hasTex = false;
             while (textureIndex < this.textureOffsets.length) {
                 let textureOffset = this.textureOffsets[textureIndex];
