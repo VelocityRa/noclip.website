@@ -51,6 +51,7 @@ export class DataStream {
     public u32(): number { return this.readUint32(); }
     public f32(): number { return this.readFloat32(); }
     public f64(): number { return this.readFloat64(); }
+    public vec2(): vec2 { return this.readVec2(); }
     public vec3(): vec3 { return this.readVec3(); }
     public vec4(): vec4 { return this.readVec4(); }
     public mat4(): mat4 { return this.readMat4(); }
