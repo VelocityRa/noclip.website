@@ -428,14 +428,14 @@ export class Mesh {
 
                 const triangleCount = stream.readUint16() * 3;
                 const indexCount = stream.readUint16();
-                const indexDataOffs1 = stream.readUint32();
-                const indexDataOffs2 = stream.readUint32();
+                const triangleDataOffset = stream.readUint32();
+                const indexDataOffset = stream.readUint32();
 
                 // Read index data
 
                 // Read triangle data
 
-                stream.offs = startOffs + indexDataOffs1;
+                stream.offs = startOffs + triangleDataOffset;
                 let trianglesIndices = new Uint16Array(triangleCount)
                 for (let i = 0; i < triangleCount; ++i) {
                     trianglesIndices[i] = stream.readUint16();
@@ -443,7 +443,7 @@ export class Mesh {
 
                 // Read index data
 
-                stream.offs = startOffs + indexDataOffs2;
+                stream.offs = startOffs + indexDataOffset;
                 let unkIndices = new Uint16Array(indexCount);
 
                 for (let i of range_end(0, indexCount)) {

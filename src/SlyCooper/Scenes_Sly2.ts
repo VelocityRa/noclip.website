@@ -12,7 +12,6 @@ import { range, range_end } from '../MathHelpers';
 import { downloadBuffer } from '../DownloadUtils';
 import { makeZipFile, ZipFileEntry } from '../ZipFile';
 import { Sly2Renderer } from './Sly2Renderer';
-import * as Settings from './SlyConstants';
 import * as Data from './SlyData';
 import { DataStream } from "./DataStream";
 import { sprintf } from "./sprintf";
@@ -46,20 +45,106 @@ function parseObjectEntries(s: DataStream): ObjectEntry[] {
     return objects;
 }
 
-class SzmeChunk {
-    private offset: number;
-    private flags: number;
+class SzmeK13 {
+    constructor(s: DataStream) {
+        let k0Count = s.u16();
+        if (k0Count > 0) {
+            for (let i = 0; i < k0Count; i++) {
+                let k11Count = s.u16();
+                for (let j = 0; j < k11Count; j++) {
+                    s.skip(2 + 2 + 1);
+                }
+            }
 
-    constructor(s: DataStream, u2Coumt: number, i0: number) {
+            let k12Count = s.u16();
+            s.skip(k12Count * 2);
+        }
+    }
+}
+
+class SzmeChunk {
+    constructor(s: DataStream, flags: number, u2Count: number, e2Count: number, i0: number) {
+        let a0Count = s.u8();
+
+        let a0UnkCount = 0;
+
+        for (let i = 0; i < a0Count; ++i) {
+            let a0x = s.u32();
+            s.skip(4 + 4);
+            a0UnkCount += a0x;
+        }
+
+        let vertexCount = s.u8();
+        s.skip(vertexCount * 3 * 4); // positions
+        s.skip(vertexCount * 2 * 4); // texcoords
+        s.skip(vertexCount * 3 * 4); // normals
+        s.skip(vertexCount * 4);     // unk (a4)
+
+        s.skip(1);
+
+        if (e2Count > 0) {
+            s.skip(4);
+
+            let e2CountMin = Math.min(e2Count, 4);
+            s.skip(vertexCount * e2CountMin);
+        }
+
+        s.skip(a0UnkCount);
+
+        let uVar28 = a0UnkCount + 0x1F;
+        let uVar29 = (uVar28 < 0 && (uVar28 & 0x1f) != 0) ? 1 : 0;
+        let a6UintCount = (uVar28 >> 5) + uVar29;
+
+        s.skip(a6UintCount * 4);
+    }
+}
+
+class Szme {
+    public offset: number;
+    public flags: number;
+
+    public chunks: SzmeChunk[] = [];
+
+    constructor(s: DataStream, u2Count: number, i0: number) {
         this.offset = s.offs;
 
-        if (s.readUint32() != Mesh.szmeMagic)
+        if (s.readUint32() != Mesh.szmeMagic) {
+            debugger;
             throw new Error(`bad SZME magic at ${hexzero0x(this.offset)}`);
+        }
 
-        // todo
+        this.flags = s.u8();
+        s.skip(2);
 
+        let e2Count = s.u8();
+        s.skip(e2Count * (4 + 2));
+
+        let e3 = s.u8();
+        if (e3 != 0xFF) {
+            let e4 = s.vec3();
+            let e5 = s.vec2();
+            let e6 = s.vec3();
+        }
+
+        let k13 = new SzmeK13(s);
+
+        if ((this.flags & 0x4) != 0) {
+            let e7 = s.u32();
+            let e8 = s.u8();
+
+            if (e8 != 0xFF) {
+                s.skip(4 + 4 + 4 + 4 + 3 * 4 * 4);
+            }
+
+            s.skip(1 + 1 + 1);
+        }
+
+        let szmeDataCount = s.u16();
+        for (let i = 0; i < szmeDataCount; ++i) {
+            let szmeChunk = new SzmeChunk(s, this.flags, u2Count, e2Count, i0);
+            this.chunks.push(szmeChunk);
+        }
     }
-
 }
 
 interface MeshChunk {
@@ -69,10 +154,10 @@ interface MeshChunk {
     vertexColor: Uint32Array; // RGBA (?)
     vertexColorFloats: Float32Array;   // vec4
 
-    trianglesIndices: Uint16Array[];
-    unkIndices: Uint16Array[];
-
-    szme: SzmeChunk;
+    trianglesIndices1: Uint16Array;
+    unkIndices1: Uint16Array;
+    trianglesIndices2: Uint16Array;
+    unkIndices2: Uint16Array;
 
     name: string; // for debugging
 }
@@ -82,14 +167,19 @@ class Mesh {
     static readonly szmeMagic = 0x454d5a53; // "SZME"
     static readonly szmsVersion = 4;
 
-    private type: number;
+    public offset: number;
 
-    private chunks: MeshChunk[] = [];
+    public type: number;
+
+    public chunks: MeshChunk[] = [];
+    public szme: Szme;
 
     public u0: number;
     public u2Count: number;
 
-    constructor(s: DataStream, i0: number) {
+    constructor(s: DataStream, public readonly container: MeshContainer, public meshIndex: number, i0: number) {
+        this.offset = s.offs;
+
         this.u0 = s.u8();
 
         if (this.u0 == 0) {
@@ -112,7 +202,7 @@ class Mesh {
                 // Read SZMS header
 
                 if (s.u32() != Mesh.szmsMagic)
-                throw new Error(`[${hexzero0x(s.offs)}] bad SZMS magic`);
+                    throw new Error(`[${hexzero0x(s.offs)}] bad SZMS magic`);
 
                 if (s.u32() != 0x4)
                     throw new Error(`[${hexzero0x(s.offs)}] unsupported version`);
@@ -182,52 +272,69 @@ class Mesh {
 
                     s.offs = startOffs + indexHeaderOffset;
 
-                    let trianglesIndices: Uint16Array[] = [];
-                    let unkIndices: Uint16Array[] = [];
-                    for (let j = 0; j < 2; ++j) {
-                        const triangleCount = s.u16() * 3;
-                        const indexCount = s.u16();
-                        const indexDataOffs1 = s.u32();
-                        const indexDataOffs2 = s.u32();
+                    const triangleCount1 = s.u16() * 3;
+                    const indexCount1 = s.u16();
+                    const triangleDataOffset1 = s.u32();
+                    const indexDataOffset1 = s.u32();
 
-                        // Read index data
+                    const triangleCount2 = s.u16() * 3;
+                    const indexCount2 = s.u16();
+                    const triangleDataOffset2 = s.u32();
+                    const indexDataOffset2 = s.u32();
 
-                        // Read triangle data
-
-                        s.offs = startOffs + indexDataOffs1;
-                        trianglesIndices.push(new Uint16Array(triangleCount));
-                        for (let i = 0; i < triangleCount; ++i) {
-                            trianglesIndices[j][i] = s.u16();
-                        }
-
-                        // Read index data
-
-                        s.offs = startOffs + indexDataOffs2;
-                        unkIndices.push(new Uint16Array(indexCount));
-                        for (let i of range_end(0, indexCount)) {
-                            unkIndices[j][i] = s.u16();
-                        }
+                    // Read triangle data 1
+                    s.offs = startOffs + triangleDataOffset1;
+                    let trianglesIndices1 = new Uint16Array(triangleCount1);
+                    for (let i = 0; i < triangleCount1; ++i) {
+                        trianglesIndices1[i] = s.u16();
+                    }
+                    // Read index data 1
+                    s.offs = startOffs + indexDataOffset1;
+                    let unkIndices1 = new Uint16Array(indexCount1);
+                    for (let i of range_end(0, indexCount1)) {
+                        unkIndices1[i] = s.u16();
+                    }
+                    // Read triangle data 2
+                    s.offs = startOffs + triangleDataOffset2;
+                    let trianglesIndices2 = new Uint16Array(triangleCount2);
+                    for (let i = 0; i < triangleCount2; ++i) {
+                        trianglesIndices2[i] = s.u16();
+                    }
+                    // Read index data 2
+                    s.offs = startOffs + indexDataOffset2;
+                    let unkIndices2 = new Uint16Array(indexCount2);
+                    for (let i of range_end(0, indexCount2)) {
+                        unkIndices2[i] = s.u16();
                     }
 
                     let meshAddr = startOffs - 2;
                     let submeshAddr = startOffs + meshOffs;
                     let submeshCount = spacePad(meshOffsets.length.toString(), 2);
-                    let szme = new SzmeChunk(s, this.u2Count, i0);
 
                     let name = `SZMS ${hexzero(meshAddr, 6)} ${submeshCount} | ${hexzero(submeshAddr)}`;
 
-                    this.chunks.push({positions, normals, texCoords, vertexColor, vertexColorFloats, trianglesIndices, unkIndices, szme, name});
+                    this.chunks.push({
+                        positions, normals, texCoords, vertexColor, vertexColorFloats,
+                        trianglesIndices1, unkIndices1, trianglesIndices2, unkIndices2, name });
                 }
+                this.szme = new Szme(s, this.u2Count, i0);
             } else {
                 throw `Unsupported type ${this.type}`;
             }
 
             for (let i = 0; i < this.u2Count; ++i) {
-                // TODO
+                s.skip(1);
+
+                if (i0 == 0)
+                    s.skip(4);
+
+                s.skip(2 + 3 * 4 * 4 + 4 + 1);
+
+                let k13 = new SzmeK13(s);
             }
         } else {
             s.skip(this.u0 * 2);
-            let u2IgnCount= s.u32();
+            let u2IgnCount = s.u32();
             s.skip(u2IgnCount);
         }
     }
@@ -237,11 +344,13 @@ class MeshContainer {
     public meshes: Mesh[] = [];
     public offset: number;
 
-    constructor(s: DataStream) {
+    constructor(s: DataStream, public containerIndex: number) {
         this.offset = s.offs;
 
-        let c2Count = s.u32();
-        if (c2Count > 0) {
+        // debugger;
+
+        let c2Count = s.u16();
+        for (let i = 0; i < c2Count; ++i) {
             let c3 = s.u16();
             let c4 = s.u16();
             let c5 = s.u32();
@@ -258,20 +367,20 @@ class MeshContainer {
                 s.skip(1);
             }
             if ((flags & 0x8) != 0) {
-                s.skip(1 + 4 + 3 * 4 * 3 + 1 + 1 + 4);
+                s.skip(1 + 4 + 3 * 4 * 4 + 1 + 1 + 4);
             }
             if ((flags & 0x10) != 0) {
-                s.skip(1+4+4);
+                s.skip(1 + 4 + 4);
             }
             if ((flags & 0x20) != 0) {
-                s.skip(3*4);
+                s.skip(3 * 4);
             }
             if (c4 < 0x10) {
                 let uVar8 = 1 << (c4 & 0x7F);
                 if ((uVar8 & 0xA001) == 0) {
                     if ((uVar8 & 0x4100) == 0) {
                         s.skip(3 * 4 * 4);
-                    } else{
+                    } else {
                         s.skip(2);
                     }
                 } else {
@@ -309,7 +418,7 @@ class MeshContainer {
         let meshCount = s.u16();
         let meshIndex = 0;
         while (meshIndex < meshCount) {
-            let mesh = new Mesh(s, i0);
+            let mesh = new Mesh(s,this, meshIndex,i0);
 
             if (mesh.u0 == 0)
                 meshIndex += mesh.u2Count;
@@ -341,6 +450,9 @@ class LevelObject {
 
 // TODO: move elsewhere
 export const SCRIPTS_EXPORT = false;
+export const MESH_EXPORT = true;
+export const SEPARATE_OBJECT_SUBMESHES = true;
+export const MESH_SCALE = 1 / 1000.0;
 
 class Sly2LevelSceneDesc implements SceneDesc {
     constructor(
@@ -369,7 +481,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
         let scriptIndex = 0;
         let textureIndex = 0;
-        let meshcontIndex = 0;
+        let meshContIndex = 0;
 
         let objects: LevelObject[] = [];
 
@@ -430,24 +542,24 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
             obj_log += ` | MESH `;
             let hasMeshcont = false;
-            while (meshcontIndex < this.meshcontOffsets.length) {
-                let meshcontOffset = this.meshcontOffsets[meshcontIndex];
+            while (meshContIndex < this.meshcontOffsets.length) {
+                let meshcontOffset = this.meshcontOffsets[meshContIndex];
 
                 if (i >= objectEntries.length || meshcontOffset > this.objectOffsets[i + 1])
                     break;
 
                 s.offs = meshcontOffset;
                 try {
-                    let meshContainer = new MeshContainer(s)
+                    let meshContainer = new MeshContainer(s, meshContIndex)
                     object.meshContainers.push(meshContainer);
                 } catch (error) {
-                    console.error(`mcont @ ${hexzero0x(meshcontOffset)} id ${meshcontIndex}: ${error}`);
+                    console.error(`mcont @ ${hexzero0x(meshcontOffset)} id ${meshContIndex}: ${error}`);
                 }
 
                 obj_log += `${hexzero(meshcontOffset)}, `
                 hasMeshcont = true;
 
-                ++meshcontIndex;
+                ++meshContIndex;
             }
             if (hasMeshcont)
                 obj_log = obj_log.substring(0, obj_log.length - 2);
@@ -460,6 +572,77 @@ class Sly2LevelSceneDesc implements SceneDesc {
         if (SCRIPTS_EXPORT) {
             const zipFile = makeZipFile(scriptFileEntries);
             downloadBuffer(`${this.id}_scripts.zip`, zipFile);
+        }
+
+        if (MESH_EXPORT) {
+            let obj_str = "";
+
+            let face_idx_base = 1;
+
+            let meshIdx = 0;
+            let chunkTotalIdx = 0;
+            for (let object of objects) {
+                for (let meshContainer of object.meshContainers) {
+                    let chunkIdx = 0;
+
+                    for (let mesh of meshContainer.meshes) {
+                        if (!SEPARATE_OBJECT_SUBMESHES) {
+                            obj_str += `o ${mesh.container.containerIndex}_${mesh.meshIndex}_${chunkTotalIdx}_${hexzero0x(mesh.offset)}\n`;
+                        }
+
+                        // TODO: instances
+
+                        for (let chunk of mesh.chunks) {
+                            obj_str += `o ${mesh.container.containerIndex}_${mesh.meshIndex}_${chunkIdx}_${chunkTotalIdx}_${hexzero0x(mesh.offset)}\n`;
+
+                            for (let i = 0; i < chunk.positions.length; i += 3) {
+                                const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
+
+                                let scaledPos = vec3.fromValues(
+                                    pos[0] * MESH_SCALE,
+                                    pos[1] * MESH_SCALE,
+                                    pos[2] * MESH_SCALE);
+
+                                obj_str += `v ${scaledPos[0]} ${scaledPos[1]} ${scaledPos[2]}\n`;
+                            }
+
+                            for (let i = 0; i < chunk.normals.length; i += 3) {
+                                let normal = vec3.fromValues(chunk.normals[i], chunk.normals[i + 1], chunk.normals[i + 2]);
+
+                                obj_str += `vn ${normal[0]} ${normal[1]} ${normal[2]}\n`;
+                            }
+
+                            for (let i = 0; i < chunk.texCoords.length; i += 2) {
+                                let texCoord = vec2.fromValues(chunk.texCoords[i], chunk.texCoords[i + 1]);
+
+                                obj_str += `vt ${texCoord[0]} ${texCoord[1]}\n`;
+                            }
+
+                            for (let i = 0; i < chunk.trianglesIndices1.length; i += 3) {
+                                const f0 = face_idx_base + chunk.trianglesIndices1[i + 0];
+                                const f1 = face_idx_base + chunk.trianglesIndices1[i + 1];
+                                const f2 = face_idx_base + chunk.trianglesIndices1[i + 2];
+
+                                obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
+                            }
+                            for (let i = 0; i < chunk.trianglesIndices2.length; i += 3) {
+                                const f0 = face_idx_base + chunk.trianglesIndices2[i + 0];
+                                const f1 = face_idx_base + chunk.trianglesIndices2[i + 1];
+                                const f2 = face_idx_base + chunk.trianglesIndices2[i + 2];
+
+                                obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
+                            }
+                            face_idx_base += chunk.positions.length / 3;
+
+                            chunkIdx++;
+                            chunkTotalIdx++;
+                        }
+                    }
+                    meshIdx++;
+                }
+            }
+
+            downloadText(`${this.id}.obj`, obj_str);
         }
 
         const renderer = new Sly2Renderer(device);
@@ -480,7 +663,7 @@ let meshcontOffsets_f_nightclub_exterior = [0x107E63, 0x1106C3, 0x1197A3, 0x1345
 const sceneDescs = [
     "The Black Chateau (Paris, France)",
     new Sly2LevelSceneDesc("f_nightclub_exterior", "The Black Chateau (Extermal)",
-    objectOffsets_f_nightclub_exterior, textureOffsets_f_nightclub_exterior, scriptOffsets_f_nightclub_exterior, meshcontOffsets_f_nightclub_exterior),
+        objectOffsets_f_nightclub_exterior, textureOffsets_f_nightclub_exterior, scriptOffsets_f_nightclub_exterior, meshcontOffsets_f_nightclub_exterior),
 ];
 
 const id = 'Sly2';
