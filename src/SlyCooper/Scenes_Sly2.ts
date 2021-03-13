@@ -63,7 +63,7 @@ class SzmeK13 {
 }
 
 class SzmeChunk {
-    constructor(s: DataStream, flags: number, u2Count: number, e2Count: number, i0: number) {
+    constructor(s: DataStream, flags: number, instanceCount: number, e2Count: number, i0: number) {
         let a0Count = s.u8();
 
         let a0UnkCount = 0;
@@ -105,7 +105,7 @@ class Szme {
 
     public chunks: SzmeChunk[] = [];
 
-    constructor(s: DataStream, u2Count: number, i0: number) {
+    constructor(s: DataStream, instanceCount: number, i0: number) {
         this.offset = s.offs;
 
         if (s.readUint32() != Mesh.szmeMagic) {
@@ -141,7 +141,7 @@ class Szme {
 
         let szmeDataCount = s.u16();
         for (let i = 0; i < szmeDataCount; ++i) {
-            let szmeChunk = new SzmeChunk(s, this.flags, u2Count, e2Count, i0);
+            let szmeChunk = new SzmeChunk(s, this.flags, instanceCount, e2Count, i0);
             this.chunks.push(szmeChunk);
         }
     }
@@ -162,6 +162,8 @@ interface MeshChunk {
     name: string; // for debugging
 }
 
+// TODO: is u6 & g4 texture ID?
+
 class Mesh {
     static readonly szmsMagic = 0x534D5A53; // "SZMS"
     static readonly szmeMagic = 0x454d5a53; // "SZME"
@@ -175,7 +177,9 @@ class Mesh {
     public szme: Szme;
 
     public u0: number;
-    public u2Count: number;
+
+    public instanceCount: number;
+    public instances: mat4[] = [];
 
     constructor(s: DataStream, public readonly container: MeshContainer, public meshIndex: number, i0: number) {
         this.offset = s.offs;
@@ -184,7 +188,7 @@ class Mesh {
 
         if (this.u0 == 0) {
             this.type = s.u8();
-            this.u2Count = s.u16();
+            this.instanceCount = s.u16();
             s.skip(2 + 1);
             let u4 = s.f32();
             let u5 = s.f32();
@@ -318,7 +322,7 @@ class Mesh {
                         trianglesIndices1, unkIndices1, trianglesIndices2, unkIndices2, name
                     });
                 }
-                this.szme = new Szme(s, this.u2Count, i0);
+                this.szme = new Szme(s, this.instanceCount, i0);
             } else if (this.type == 3) {
                 let p0Count = s.u8();
                 s.skip(p0Count * (4 + 4));
@@ -348,13 +352,18 @@ class Mesh {
                 throw `Unsupported type ${this.type}`;
             }
 
-            for (let i = 0; i < this.u2Count; ++i) {
+            for (let i = 0; i < this.instanceCount; ++i) {
                 s.skip(1);
 
                 if (i0 == 0)
                     s.skip(4);
 
-                s.skip(2 + 3 * 4 * 4 + 4 + 1);
+                s.skip(2);
+
+                let instanceMat = s.mat4();
+                this.instances.push(instanceMat);
+
+                s.skip(4 + 1);
 
                 let k13 = new SzmeK13(s);
             }
@@ -448,7 +457,7 @@ class MeshContainer {
             let mesh = new Mesh(s,this, meshIndex,i0);
 
             if (mesh.u0 == 0)
-                meshIndex += mesh.u2Count;
+                meshIndex += mesh.instanceCount;
             else
                 meshIndex--;
 
@@ -480,7 +489,7 @@ class LevelObject {
 // TODO: move elsewhere
 export const SCRIPTS_EXPORT = false;
 export const MESH_EXPORT = true;
-export const SEPARATE_OBJECT_SUBMESHES = false;
+export const SEPARATE_OBJECT_SUBMESHES = true;
 export const MESH_SCALE = 1 / 1000.0;
 
 class Sly2LevelSceneDesc implements SceneDesc {
@@ -610,7 +619,6 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
             let face_idx_base = 1;
 
-            let meshIdx = 0;
             let chunkTotalIdx = 0;
             for (let object of objects) {
                 for (let meshContainer of object.meshContainers) {
@@ -618,58 +626,81 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
                     for (let mesh of meshContainer.meshes) {
                         if (!SEPARATE_OBJECT_SUBMESHES)
-                            obj_str += `o ${object.header.name}_${mesh.container.containerIndex}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero0x(mesh.offset)}\n`;
+                            obj_str += `o ${mesh.container.containerIndex}_${object.header.name}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero(mesh.offset)}\n`;
 
-                        // TODO: instances
+                        let meshInstanceMatrices = [mat4.create()];
 
-                        for (let chunk of mesh.chunks) {
-                            if (SEPARATE_OBJECT_SUBMESHES)
-                                obj_str += `o ${mesh.container.containerIndex}_${mesh.meshIndex}_${chunkIdx}_${chunkTotalIdx}_${hexzero0x(mesh.offset)}\n`;
+                        for (let meshInstance of mesh.instances)
+                            meshInstanceMatrices.push(meshInstance);
 
-                            for (let i = 0; i < chunk.positions.length; i += 3) {
-                                const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
+                        let instanceIdx = 0;
+                        for (let meshInstanceMatrix of meshInstanceMatrices) {
+                            for (let chunk of mesh.chunks) {
+                                if (SEPARATE_OBJECT_SUBMESHES)
+                                    obj_str += `o ${mesh.container.containerIndex}_${object.header.name}_${mesh.meshIndex}_${chunkIdx}_${instanceIdx}_${chunkTotalIdx}_${hexzero(mesh.offset)}\n`;
 
-                                let scaledPos = vec3.fromValues(
-                                    pos[0] * MESH_SCALE,
-                                    pos[1] * MESH_SCALE,
-                                    pos[2] * MESH_SCALE);
+                                if (instanceIdx == 0) {
+                                    for (let i = 0; i < chunk.positions.length; i += 3) {
+                                        const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
 
-                                obj_str += `v ${scaledPos[0]} ${scaledPos[1]} ${scaledPos[2]}\n`;
+                                        let scaledPos = vec3.fromValues(
+                                            pos[0] * MESH_SCALE,
+                                            pos[1] * MESH_SCALE,
+                                            pos[2] * MESH_SCALE);
+
+                                        obj_str += `v ${scaledPos[0]} ${scaledPos[1]} ${scaledPos[2]}\n`;
+                                    }
+                                } else {
+                                    let newPos = vec3.create();
+
+                                    for (let i = 0; i < chunk.positions.length; i += 3) {
+                                        const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
+
+                                        vec3.transformMat4(newPos, pos, meshInstanceMatrix);
+
+                                        let scaledPos = vec3.fromValues(
+                                            newPos[0] * MESH_SCALE,
+                                            newPos[1] * MESH_SCALE,
+                                            newPos[2] * MESH_SCALE);
+
+                                        obj_str += `v ${scaledPos[0]} ${scaledPos[1]} ${scaledPos[2]}\n`;
+                                    }
+                                }
+
+                                for (let i = 0; i < chunk.normals.length; i += 3) {
+                                    let normal = vec3.fromValues(chunk.normals[i], chunk.normals[i + 1], chunk.normals[i + 2]);
+
+                                    obj_str += `vn ${normal[0]} ${normal[1]} ${normal[2]}\n`;
+                                }
+
+                                for (let i = 0; i < chunk.texCoords.length; i += 2) {
+                                    let texCoord = vec2.fromValues(chunk.texCoords[i], chunk.texCoords[i + 1]);
+
+                                    obj_str += `vt ${texCoord[0]} ${texCoord[1]}\n`;
+                                }
+
+                                for (let i = 0; i < chunk.trianglesIndices1.length; i += 3) {
+                                    const f0 = face_idx_base + chunk.trianglesIndices1[i + 0];
+                                    const f1 = face_idx_base + chunk.trianglesIndices1[i + 1];
+                                    const f2 = face_idx_base + chunk.trianglesIndices1[i + 2];
+
+                                    obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
+                                }
+                                for (let i = 0; i < chunk.trianglesIndices2.length; i += 3) {
+                                    const f0 = face_idx_base + chunk.trianglesIndices2[i + 0];
+                                    const f1 = face_idx_base + chunk.trianglesIndices2[i + 1];
+                                    const f2 = face_idx_base + chunk.trianglesIndices2[i + 2];
+
+                                    obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
+                                }
+                                face_idx_base += chunk.positions.length / 3;
+
+                                chunkIdx++;
+                                chunkTotalIdx++;
                             }
-
-                            for (let i = 0; i < chunk.normals.length; i += 3) {
-                                let normal = vec3.fromValues(chunk.normals[i], chunk.normals[i + 1], chunk.normals[i + 2]);
-
-                                obj_str += `vn ${normal[0]} ${normal[1]} ${normal[2]}\n`;
-                            }
-
-                            for (let i = 0; i < chunk.texCoords.length; i += 2) {
-                                let texCoord = vec2.fromValues(chunk.texCoords[i], chunk.texCoords[i + 1]);
-
-                                obj_str += `vt ${texCoord[0]} ${texCoord[1]}\n`;
-                            }
-
-                            for (let i = 0; i < chunk.trianglesIndices1.length; i += 3) {
-                                const f0 = face_idx_base + chunk.trianglesIndices1[i + 0];
-                                const f1 = face_idx_base + chunk.trianglesIndices1[i + 1];
-                                const f2 = face_idx_base + chunk.trianglesIndices1[i + 2];
-
-                                obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
-                            }
-                            for (let i = 0; i < chunk.trianglesIndices2.length; i += 3) {
-                                const f0 = face_idx_base + chunk.trianglesIndices2[i + 0];
-                                const f1 = face_idx_base + chunk.trianglesIndices2[i + 1];
-                                const f2 = face_idx_base + chunk.trianglesIndices2[i + 2];
-
-                                obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
-                            }
-                            face_idx_base += chunk.positions.length / 3;
-
-                            chunkIdx++;
-                            chunkTotalIdx++;
+                            instanceIdx++;
                         }
                     }
-                    meshIdx++;
                 }
             }
 
