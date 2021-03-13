@@ -198,7 +198,6 @@ class Sly1LevelSceneDesc implements SceneDesc {
 
                 let face_idx_base = 1;
 
-                let meshIdx = 0;
                 let chunkTotalIdx = 0;
                 for (let meshContainer of this.meshContainers) {
                     let chunkIdx = 0;
@@ -282,7 +281,6 @@ class Sly1LevelSceneDesc implements SceneDesc {
                                 chunkIdx++;
                                 chunkTotalIdx++;
                             }
-                            meshIdx++;
                             instanceIdx++;
                         }
                     }
