@@ -139,18 +139,18 @@ class Sly1LevelSceneDesc implements SceneDesc {
                 }
             };
 
-            const is1Img1Pal = (texEntry.clutIndices.length == texEntry.imageIndices.length);
-            const is1ImgManyPal = (texEntry.imageIndices.length == 1) && (texEntry.clutIndices.length > 1);
-            const isManyImgManyPal = !is1Img1Pal && (texEntry.imageIndices.length > 1) && (texEntry.clutIndices.length > 1);
+            const isNImgNPal = (texEntry.clutIndices.length == texEntry.imageIndices.length);
+            const is1ImgNPal = (texEntry.imageIndices.length == 1) && (texEntry.clutIndices.length > 1);
+            const isNImgMPal = !isNImgNPal && (texEntry.imageIndices.length > 1) && (texEntry.clutIndices.length > 1);
 
-            if (is1Img1Pal) {
+            if (isNImgNPal) {
                 // for (let i = 0; i < texEntry.clutIndices.length; i++) {
                 //     makeTexture(texEntry.clutIndices[i], texEntry.imageIndices[i]);
                 // }
                 // console.log(`1img1pal: CLUT:[${texEntry.clutIndices}] IMG[${texEntry.imageIndices}]`);
                 // Use first one
                 makeTexture(texEntry.clutIndices[0], texEntry.imageIndices[0]);
-            } else if (is1ImgManyPal) {
+            } else if (is1ImgNPal) {
                 // for (let palIndex of texEntry.clutIndices) {
                 //     makeTexture(palIndex, texEntry.imageIndices[0]);
                 // }
@@ -164,7 +164,7 @@ class Sly1LevelSceneDesc implements SceneDesc {
                     makeTexture(texEntry.clutIndices[0], texEntry.imageIndices[0]);
                 }
 
-            } else if (isManyImgManyPal) {
+            } else if (isNImgMPal) {
                 if (!Number.isInteger(texEntry.clutIndices.length / texEntry.imageIndices.length)) {
                     console.log(`WARN: nonint m2m ${texEntryIdx} ${texEntry.clutIndices.length} ${texEntry.imageIndices.length}`);
                 }

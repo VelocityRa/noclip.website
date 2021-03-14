@@ -27,13 +27,17 @@ export class DataStream {
         );
     }
 
+    public readBuffer(size: number): ArrayBufferSlice {
+        const slice = this.buffer.slice(this.offs, this.offs + size);
+        this.offs += size;
+        return slice;
+    }
     public readString(size: number): string {
-        let view = this.buffer.slice(this.offs, this.offs + size).createTypedArray(Uint8Array);
+        const view = this.readBuffer(size).createTypedArray(Uint8Array);
         let str = this.dec.decode(view);
-        let nullIdx = str.indexOf('\0');
+        const nullIdx = str.indexOf('\0');
         if (nullIdx != -1)
             str = str.substr(0, nullIdx); // Trim trailing null terminators
-        this.offs += size;
         return str;
     }
 
@@ -56,6 +60,7 @@ export class DataStream {
     public vec4(): vec4 { return this.readVec4(); }
     public mat4(): mat4 { return this.readMat4(); }
 
+    public buf(size: number): ArrayBufferSlice { return this.readBuffer(size); }
     public str(size: number): string { return this.readString(size); }
 
     public u8At(offset: number): number { return this.readUint8At(offset); }
