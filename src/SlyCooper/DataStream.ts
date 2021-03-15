@@ -1,5 +1,5 @@
 import ArrayBufferSlice from '../ArrayBufferSlice';
-import { vec2, vec3, vec4, mat4 } from "gl-matrix";
+import { vec2, vec3, vec4, mat3, mat4 } from "gl-matrix";
 
 export class DataStream {
     constructor(
@@ -18,6 +18,13 @@ export class DataStream {
     public readVec2(): vec2 { return vec2.fromValues(this.readFloat32(), this.readFloat32()); }
     public readVec3(): vec3 { return vec3.fromValues(this.readFloat32(), this.readFloat32(), this.readFloat32()); }
     public readVec4(): vec4 { return vec4.fromValues(this.readFloat32(), this.readFloat32(), this.readFloat32(), this.readFloat32()); }
+    public readMat3(): mat3 {
+        return mat3.fromValues(
+            this.readFloat32(), this.readFloat32(), this.readFloat32(), //
+            this.readFloat32(), this.readFloat32(), this.readFloat32(), //
+            this.readFloat32(), this.readFloat32(), this.readFloat32(), //
+        );
+    }
     public readMat4(): mat4 {
         return mat4.fromValues(
             this.readFloat32(), this.readFloat32(), this.readFloat32(), 0, //
@@ -28,12 +35,18 @@ export class DataStream {
     }
 
     public readBuffer(size: number): ArrayBufferSlice {
-        const slice = this.buffer.slice(this.offs, this.offs + size);
+        const slice = this.readBufferAt(this.offs, size);
         this.offs += size;
         return slice;
     }
+    public readBufferAt(offset: number, size: number): ArrayBufferSlice { return this.buffer.slice(offset, offset + size); }
     public readString(size: number): string {
-        const view = this.readBuffer(size).createTypedArray(Uint8Array);
+        let str = this.readStringAt(this.offs, size);
+        this.offs += size;
+        return str;
+    }
+    public readStringAt(offset: number, size: number): string {
+        const view = this.readBufferAt(offset, size).createTypedArray(Uint8Array);
         let str = this.dec.decode(view);
         const nullIdx = str.indexOf('\0');
         if (nullIdx != -1)
@@ -58,10 +71,13 @@ export class DataStream {
     public vec2(): vec2 { return this.readVec2(); }
     public vec3(): vec3 { return this.readVec3(); }
     public vec4(): vec4 { return this.readVec4(); }
+    public mat3(): mat3 { return this.readMat3(); }
     public mat4(): mat4 { return this.readMat4(); }
 
     public buf(size: number): ArrayBufferSlice { return this.readBuffer(size); }
+    public bufAt(offset: number, size: number): ArrayBufferSlice { return this.readBufferAt(offset, size); }
     public str(size: number): string { return this.readString(size); }
+    public strAt(offset: number, size: number): string { return this.readStringAt(offset, size); }
 
     public u8At(offset: number): number { return this.readUint8At(offset); }
     public u16At(offset: number): number { return this.readUint16At(offset); }
