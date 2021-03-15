@@ -12,7 +12,7 @@ import { range, range_end } from '../MathHelpers';
 import { downloadBuffer } from '../DownloadUtils';
 import { makeZipFile, ZipFileEntry } from '../ZipFile';
 import { Sly2Renderer } from './Sly2Renderer';
-import * as Data from './SlyData';
+import { Texture } from './SlyData';
 import { DataStream } from "./DataStream";
 import { sprintf } from "./sprintf";
 
@@ -24,6 +24,7 @@ let enc = new TextEncoder();
 
 // TODO: move to other file
 interface ObjectEntry {
+    index: number;
     name: string;
     type: string; // char
     count: number;
@@ -41,7 +42,7 @@ function parseObjectEntries(s: DataStream): ObjectEntry[] {
 
         let count = s.u32();
 
-        objects.push({ name, type, count });
+        objects.push({ index: i, name, type, count });
     }
 
     return objects;
@@ -164,7 +165,7 @@ interface MeshChunk {
     name: string; // for debugging
 }
 
-// TODO: is u6 & g4 texture ID?
+// TODO: is u6 & g4 texture ID? OR a5?
 
 class Mesh {
     static readonly szmsMagic = 0x534D5A53; // "SZMS"
@@ -473,43 +474,53 @@ class MeshContainer {
 }
 
 class TextureClut {
+    public h1: number; // if != 1, data is 'inline'. rare
+
     public data: ArrayBufferSlice;
     public dataOffset: number;
 
+    public entryCount: number;
+    public formatSize: number;
+
     constructor(s: DataStream) {
         s.skip(4);
-        let h1 = s.u8(); // if != 1, data is 'inline'. rare
+        this.h1 = s.u8(); // if != 1, data is 'inline'. rare
         let h2Count = s.u8();
         s.skip(1 + 1);
-        let inlineDataSize = s.u16();
-        let formatSize = s.u8();
+        this.entryCount = s.u16();
+        this.formatSize = s.u8();
         s.skip(1);
         this.dataOffset = s.u32();
         s.skip(h2Count * 2);
-        if (h1 != 1 && inlineDataSize > 0)
-            this.data = s.buf(inlineDataSize * formatSize);
+        if (this.h1 != 1 && this.entryCount > 0)
+            this.data = s.buf(this.entryCount * this.formatSize);
     }
 }
 
 class TextureImage {
+    public h1: number; // if != 1, data is 'inline'. rare
+
     public data: ArrayBufferSlice;
     public dataOffset: number;
+
+    public dataSize: number;
+
     public width: number;
     public height: number;
 
     constructor(s: DataStream) {
         s.skip(4);
-        let h1 = s.u8(); // if != 1, data is 'inline'. rare
+        this.h1 = s.u8();
         let h2Count = s.u8();
         s.skip(1 + 1);
         this.width = s.u16();
         this.height = s.u16();
         s.skip(1 + 1 + 2)
-        let inlineDataSize = s.u32();
+        this.dataSize = s.u32();
         this.dataOffset = s.u32();
         s.skip(h2Count * 2);
-        if (h1 != 1 && inlineDataSize > 0)
-            this.data = s.buf(inlineDataSize);
+        if (this.h1 != 1 && this.dataSize > 0)
+            this.data = s.buf(this.dataSize);
     }
 }
 
@@ -547,7 +558,6 @@ class TextureContainer {
 
     constructor(s: DataStream, dataSize: number) {
         let clutCount = s.u16();
-        if (clutCount == 0x49) debugger;
         for (let i = 0; i < clutCount; ++i)
             this.cluts.push(new TextureClut(s));
 
@@ -562,12 +572,18 @@ class TextureContainer {
         for (let i = 0; i < textureDescCount; ++i)
             this.textureDescs.push(new TextureDesc(s));
 
+        console.log(`[${hexzero(s.offs)}] ${clutCount} ${imageCount}`);
+
         s.align(0x10);
         const data = s.buf(dataSize);
 
-        // todo consolidate
-        console.log(`[${hexzero(s.offs)}] ${clutCount} ${imageCount}`);
+        for (let clut of this.cluts)
+            if (clut.h1 == 1)
+                clut.data = data.slice(clut.dataOffset, clut.dataOffset + clut.entryCount * clut.formatSize);
 
+        for (let image of this.images)
+            if (image.h1 == 1)
+                image.data = data.slice(image.dataOffset, image.dataOffset + image.dataSize);
     }
 }
 
@@ -576,14 +592,18 @@ class LevelObject {
     public header: ObjectEntry;
     public meshContainers: MeshContainer[] = [];
     public textureContainer: TextureContainer;
+    public textures: Texture[] = [];
 }
 
 // function parseObject(stream: DataStream, scriptOffsets: (number[] | null)): Object {
 // }
 
+// TODO: instances for other objects
+
 // TODO: move elsewhere
 export const SCRIPTS_EXPORT = false;
-export const MESH_EXPORT = true;
+export const MESH_EXPORT = false;
+export const TEXTURES_EXPORT = true;
 export const SEPARATE_OBJECT_SUBMESHES = true;
 export const MESH_SCALE = 1 / 1000.0;
 
@@ -709,6 +729,116 @@ class Sly2LevelSceneDesc implements SceneDesc {
             downloadBuffer(`${this.id}_scripts.zip`, zipFile);
         }
 
+        for (let object of objects) {
+            let texEntryIdx = 0;
+            const texCont = object.textureContainer;
+            let descIdx = 0;
+            for (let desc of texCont.textureDescs) {
+                for (let indices of desc.indices) {
+                    let makeTexture = (clutIndexIndex: number, imageIndexIndex: number) => {
+                        const clutIndex = indices.clutIndices[clutIndexIndex];
+                        const imageIndex = indices.imageIndices[imageIndexIndex];
+
+                        if (clutIndex >= texCont.cluts.length) {
+                            console.warn(`warn: [id ${texEntryIdx}] clutIndex (${clutIndex}) out of bounds, skipping`);
+                            return;
+                        }
+                        if (imageIndex >= texCont.images.length) {
+                            console.warn(`warn: [id ${texEntryIdx}] imageIndex (${imageIndex}) out of bounds, skipping`);
+                            return;
+                        }
+                        let clutMeta = texCont.cluts[clutIndex];
+                        let imageMeta = texCont.images[imageIndex];
+
+                        const width = imageMeta.width;
+                        const height = imageMeta.height;
+                        // console.log(`clutMeta: ${clutMeta.offset} imageMeta: ${imageMeta.offset}`);
+                        // console.log(`w: ${width} h: ${height} C: ${hexzero(clutMeta.offset, 8)} I: ${hexzero(imageMeta.offset, 8)}`);
+
+                        const name = sprintf(`%d_%s %03d-%02d-%02d-%02d %03d-%03d Res %04dx%04d Clt %05X Img %06X Cols %03d`,
+                            object.header.index, object.header.name, texEntryIdx, descIdx, clutIndexIndex, imageIndexIndex, clutIndex, imageIndex, width, height,
+                            clutMeta.dataOffset, imageMeta.dataOffset, clutMeta.entryCount);
+                        console.info(name);
+                        console.log(`pal ${hexzero(clutMeta.data.byteLength)} ${hexzero(clutMeta.dataOffset)} img ${hexzero(imageMeta.data.byteLength)} ${hexzero(imageMeta.dataOffset)}`);
+
+                        const paletteBuf = clutMeta.data;
+                        const imageBuf = imageMeta.data;
+
+                        const texture = new Texture(texEntryIdx, paletteBuf, imageBuf, width, height, clutMeta.entryCount, clutMeta.formatSize, name);
+                        object.textures.push(texture);
+                    };
+
+                    const clutCount = indices.clutIndices.length;
+                    const imageCount = indices.imageIndices.length;
+
+                    const isNImgNPal = (clutCount == imageCount);
+                    const is1Img1Pal = (clutCount == 1 && imageCount == 1);
+                    const is1ImgNPal = (clutCount == 1 && imageCount > 1);
+                    const isNImgMPal = (!isNImgNPal && clutCount > 1 && imageCount > 1);
+                    const isPalDoubleImg = (clutCount == imageCount * 2);
+                    const isPalTripleImg = (clutCount == imageCount * 3);
+
+                    if (is1Img1Pal) {
+                        console.log(`1ImgMPal: ${texEntryIdx} ${clutCount} ${imageCount}`);
+                        makeTexture(0, 0);
+                    } else if (is1ImgNPal) {
+                        console.log(`1ImgMPal: ${texEntryIdx} ${clutCount} ${imageCount}`);
+                        for (let clutIndexIndex = 0; clutIndexIndex < indices.clutIndices.length; ++clutIndexIndex) {
+                            makeTexture(clutIndexIndex, 0);
+                        }
+                    } else if (isPalDoubleImg) {
+                        console.log(`PalDoubleImg: ${texEntryIdx} ${clutCount} ${imageCount}`);
+                        for (let i = 0; i < indices.imageIndices.length; ++i) {
+                            makeTexture(i * 2 + 0, i);
+                            makeTexture(i * 2 + 1, i);
+                        }
+                    } else if (isPalTripleImg) {
+                        console.log(`PalTripleImg: ${texEntryIdx} ${clutCount} ${imageCount}`);
+                        for (let i = 0; i < indices.imageIndices.length; ++i) {
+                            makeTexture(i * 3 + 0, i);
+                            makeTexture(i * 3 + 1, i);
+                            makeTexture(i * 3 + 2, i);
+                        }
+                    } else if (isNImgMPal) {
+                        console.error(`NImgMPal: ${texEntryIdx} ${clutCount} ${imageCount}`);
+                        if (!Number.isInteger(clutCount / imageCount)) {
+                            console.warn(`NImgMPal: nonint ${texEntryIdx} ${clutCount} ${imageCount}`);
+                        }
+                        // Use first ones
+                        makeTexture(0, 0);
+                    }
+
+                    descIdx++;
+                }
+                texEntryIdx++;
+            }
+        }
+
+        if (TEXTURES_EXPORT) {
+            let zipFileEntries: ZipFileEntry[] = [];
+
+            const dumpTextures = async (textures: (Texture | null)[]) => {
+                await Promise.all(textures.filter((texture) => texture !== null).map(async (texture) => {
+                    const surface = texture!.toCanvas().surfaces[0];
+                    const blob: (Blob | null) = await new Promise((resolve, reject) => {
+                        surface.toBlob((blob: Blob | null) => blob !== null ? resolve(blob) : reject(null));
+                    });
+                    if (blob) {
+                        const data = await blob.arrayBuffer();
+                        zipFileEntries.push({ filename: texture!.name + '.png', data: new ArrayBufferSlice(data) });
+                    }
+                }));
+            };
+
+            for (let object of objects)
+                await dumpTextures(object.textures);
+
+            console.log(zipFileEntries);
+
+            const zipFile = makeZipFile(zipFileEntries);
+            downloadBuffer(`${this.id}_textures.zip`, zipFile);
+        }
+
         if (MESH_EXPORT) {
             let obj_str = "";
 
@@ -721,7 +851,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
                     for (let mesh of meshContainer.meshes) {
                         if (!SEPARATE_OBJECT_SUBMESHES)
-                            obj_str += `o ${mesh.container.containerIndex}_${object.header.name}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero(mesh.offset)}\n`;
+                            obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero(mesh.offset)}\n`;
 
                         let meshInstanceMatrices = [mat4.create()];
 
@@ -732,7 +862,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
                         for (let meshInstanceMatrix of meshInstanceMatrices) {
                             for (let chunk of mesh.chunks) {
                                 if (SEPARATE_OBJECT_SUBMESHES)
-                                    obj_str += `o ${mesh.container.containerIndex}_${object.header.name}_${mesh.meshIndex}_${chunkIdx}_${instanceIdx}_${chunkTotalIdx}_${hexzero(mesh.offset)}\n`;
+                                    obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkIdx}_${instanceIdx}_${chunkTotalIdx}_${hexzero(mesh.offset)}\n`;
 
                                 if (instanceIdx == 0) {
                                     for (let i = 0; i < chunk.positions.length; i += 3) {
