@@ -32,15 +32,15 @@ interface ObjectEntry {
 function parseObjectEntries(s: DataStream): ObjectEntry[] {
     let objects: ObjectEntry[] = [];
 
-    let objectCount = s.u16();
+    const objectCount = s.u16();
     for (let i = 0; i < objectCount; ++i) {
-        let resourceDescriptorStr = s.readString(0x40);
-        let type = resourceDescriptorStr[3];
-        let name = resourceDescriptorStr.substr(4);
+        const resourceDescriptorStr = s.readString(0x40);
+        const type = resourceDescriptorStr[3];
+        const name = resourceDescriptorStr.substr(4);
 
         s.skip(4 * 4);
 
-        let count = s.u32();
+        const count = s.u32();
 
         objects.push({ index: i, name, type, count });
     }
@@ -50,10 +50,10 @@ function parseObjectEntries(s: DataStream): ObjectEntry[] {
 
 class SzmeK13 {
     constructor(s: DataStream) {
-        let k0Count = s.u16();
+        const k0Count = s.u16();
         if (k0Count > 0) {
             for (let i = 0; i < k0Count; i++) {
-                let k11Count = s.u16();
+                const k11Count = s.u16();
                 for (let j = 0; j < k11Count; j++) {
                     s.skip(2 + 2 + 1);
                 }
@@ -66,18 +66,25 @@ class SzmeK13 {
 }
 
 class SzmeChunk {
+    public textureId: (number | null) = null;
+
     constructor(s: DataStream, flags: number, instanceCount: number, e2Count: number, i0: number) {
-        let a0Count = s.u8();
+        const a0Count = s.u8();
 
         let a0UnkCount = 0;
 
         for (let i = 0; i < a0Count; ++i) {
-            let a0x = s.u32();
-            s.skip(4 + 4);
+            const a0x = s.u32();
+            const a0y = s.u32();
+            const a0z = s.u32();
+
+            if (i == 0)
+                this.textureId = a0y;
+
             a0UnkCount += a0x;
         }
 
-        let vertexCount = s.u8();
+        const vertexCount = s.u8();
         s.skip(vertexCount * 3 * 4); // positions
         s.skip(vertexCount * 2 * 4); // texcoords
         s.skip(vertexCount * 3 * 4); // normals
@@ -88,15 +95,15 @@ class SzmeChunk {
         if (e2Count > 0) {
             s.skip(4);
 
-            let e2CountMin = Math.min(e2Count, 4);
+            const e2CountMin = Math.min(e2Count, 4);
             s.skip(vertexCount * e2CountMin);
         }
 
         s.skip(a0UnkCount);
 
-        let uVar28 = a0UnkCount + 0x1F;
-        let uVar29 = (uVar28 < 0 && (uVar28 & 0x1f) != 0) ? 1 : 0;
-        let a6UintCount = (uVar28 >> 5) + uVar29;
+        const uVar28 = a0UnkCount + 0x1F;
+        const uVar29 = (uVar28 < 0 && (uVar28 & 0x1f) != 0) ? 1 : 0;
+        const a6UintCount = (uVar28 >> 5) + uVar29;
 
         s.skip(a6UintCount * 4);
     }
@@ -119,21 +126,21 @@ class Szme {
         this.flags = s.u8();
         s.skip(2);
 
-        let e2Count = s.u8();
+        const e2Count = s.u8();
         s.skip(e2Count * (4 + 2));
 
-        let e3 = s.u8();
+        const e3 = s.u8();
         if (e3 != 0xFF) {
-            let e4 = s.vec3();
-            let e5 = s.vec2();
-            let e6 = s.vec3();
+            const e4 = s.vec3();
+            const e5 = s.vec2();
+            const e6 = s.vec3();
         }
 
-        let k13 = new SzmeK13(s);
+        const k13 = new SzmeK13(s);
 
         if ((this.flags & 0x4) != 0) {
-            let e7 = s.u32();
-            let e8 = s.u8();
+            const e7 = s.u32();
+            const e8 = s.u8();
 
             if (e8 != 0xFF) {
                 s.skip(4 + 4 + 4 + 4 + 3 * 4 * 4);
@@ -142,9 +149,9 @@ class Szme {
             s.skip(1 + 1 + 1);
         }
 
-        let szmeDataCount = s.u16();
+        const szmeDataCount = s.u16();
         for (let i = 0; i < szmeDataCount; ++i) {
-            let szmeChunk = new SzmeChunk(s, this.flags, instanceCount, e2Count, i0);
+            const szmeChunk = new SzmeChunk(s, this.flags, instanceCount, e2Count, i0);
             this.chunks.push(szmeChunk);
         }
     }
@@ -165,7 +172,7 @@ interface MeshChunk {
     name: string; // for debugging
 }
 
-// TODO: is u6 & g4 texture ID? OR a5?
+// TODO: is u6 & g4 texture ID?
 
 class Mesh {
     static readonly szmsMagic = 0x534D5A53; // "SZMS"
@@ -193,16 +200,16 @@ class Mesh {
             this.type = s.u8();
             this.instanceCount = s.u16();
             s.skip(2 + 1);
-            let u4 = s.f32();
-            let u5 = s.f32();
-            let u6 = s.u32();
+            const u4 = s.f32();
+            const u5 = s.f32();
+            const u6 = s.u32();
             s.skip(1 + 1);
 
             if (i0 == 0) {
-                let u9 = s.vec3();
-                let u10 = s.f32();
-                let u11 = s.u32();
-                let u12 = s.f32();
+                const u9 = s.vec3();
+                const u10 = s.f32();
+                const u11 = s.u32();
+                const u12 = s.f32();
             }
 
             if (this.type == 0) {
@@ -291,19 +298,19 @@ class Mesh {
 
                     // Read triangle data 1
                     s.offs = startOffs + triangleDataOffset1;
-                    let trianglesIndices1 = new Uint16Array(triangleCount1);
+                    const trianglesIndices1 = new Uint16Array(triangleCount1);
                     for (let i = 0; i < triangleCount1; ++i) {
                         trianglesIndices1[i] = s.u16();
                     }
                     // Read index data 1
                     s.offs = startOffs + indexDataOffset1;
-                    let unkIndices1 = new Uint16Array(indexCount1);
+                    const unkIndices1 = new Uint16Array(indexCount1);
                     for (let i of range_end(0, indexCount1)) {
                         unkIndices1[i] = s.u16();
                     }
                     // Read triangle data 2
                     s.offs = startOffs + triangleDataOffset2;
-                    let trianglesIndices2 = new Uint16Array(triangleCount2);
+                    const trianglesIndices2 = new Uint16Array(triangleCount2);
                     for (let i = 0; i < triangleCount2; ++i) {
                         trianglesIndices2[i] = s.u16();
                     }
@@ -387,12 +394,12 @@ class MeshContainer {
 
         // debugger;
 
-        let c2Count = s.u16();
+        const c2Count = s.u16();
         for (let i = 0; i < c2Count; ++i) {
-            let c3 = s.u16();
-            let c4 = s.u16();
-            let c5 = s.u32();
-            let flags = s.u8();
+            const c3 = s.u16();
+            const c4 = s.u16();
+            const c5 = s.u32();
+            const flags = s.u8();
 
             if ((flags & 0x1) == 0) {
                 if ((flags & 0x2) != 0) {
@@ -429,35 +436,35 @@ class MeshContainer {
             }
         }
 
-        let caCount = s.u8();
+        const caCount = s.u8();
         const caSize = 2 + 2 + 2 + 3 * 4 + 2 + 3 * 4;
         s.skip(caCount * caSize);
 
-        let cbCount = s.u8();
+        const cbCount = s.u8();
         const cbSize = 2 + 2 + 1 + 1;
         s.skip(cbCount * cbSize);
 
-        let ccCount = s.u8();
+        const ccCount = s.u8();
         for (let i = 0; i < ccCount; ++i) {
             s.skip(1 + 4 + 4 + 4 + 4 + 3 * 4 + 3 * 4);
-            let cc7Count = s.u8();
+            const cc7Count = s.u8();
             s.skip(cc7Count * 2);
         }
 
         s.skip(2 + 2 + 2 + 4);
 
-        let i0 = s.u8();
-        let i1 = s.vec3();
-        let i2 = s.f32();
-        let i3Count = s.u8();
+        const i0 = s.u8();
+        const i1 = s.vec3();
+        const i2 = s.f32();
+        const i3Count = s.u8();
         s.skip(i3Count * (2 + 0x20));
         s.skip(1);
 
-        let meshCount = s.u16();
+        const meshCount = s.u16();
         console.log(`meshCount: ${meshCount}`);
         let meshIndex = 0;
         while (meshIndex < meshCount) {
-            let mesh = new Mesh(s, this, meshIndex, i0);
+            const mesh = new Mesh(s, this, meshIndex, i0);
 
             if (mesh.u0 == 0)
                 meshIndex += mesh.instanceCount;
@@ -485,7 +492,7 @@ class TextureClut {
     constructor(s: DataStream) {
         s.skip(4);
         this.h1 = s.u8(); // if != 1, data is 'inline'. rare
-        let h2Count = s.u8();
+        const h2Count = s.u8();
         s.skip(1 + 1);
         this.entryCount = s.u16();
         this.formatSize = s.u8();
@@ -511,7 +518,7 @@ class TextureImage {
     constructor(s: DataStream) {
         s.skip(4);
         this.h1 = s.u8();
-        let h2Count = s.u8();
+        const h2Count = s.u8();
         s.skip(1 + 1);
         this.width = s.u16();
         this.height = s.u16();
@@ -530,8 +537,8 @@ class TextureIndices {
 
     constructor(s: DataStream) {
         s.skip(4 + 2);
-        let imageIndicesCount = s.u8();
-        let clutIndicesCount = s.u8();
+        const imageIndicesCount = s.u8();
+        const clutIndicesCount = s.u8();
         for (let i = 0; i < imageIndicesCount; ++i)
             this.imageIndices.push(s.u16());
         for (let i = 0; i < clutIndicesCount; ++i)
@@ -544,7 +551,7 @@ class TextureDesc {
 
     constructor(s: DataStream) {
         s.skip(0x17);
-        let innerCount = s.u8();
+        const innerCount = s.u8();
         s.skip(2);
         for (let i = 0; i < innerCount; i++)
             this.indices.push(new TextureIndices(s));
@@ -557,18 +564,18 @@ class TextureContainer {
     public textureDescs: TextureDesc[] = [];
 
     constructor(s: DataStream, dataSize: number) {
-        let clutCount = s.u16();
+        const clutCount = s.u16();
         for (let i = 0; i < clutCount; ++i)
             this.cluts.push(new TextureClut(s));
 
-        let imageCount = s.u16();
+        const imageCount = s.u16();
         for (let i = 0; i < imageCount; ++i)
             this.images.push(new TextureImage(s));
 
-        let i3Count = s.u16();
+        const i3Count = s.u16();
         s.skip(i3Count * (2 + 0x20));
 
-        let textureDescCount = s.u16();
+        const textureDescCount = s.u16();
         for (let i = 0; i < textureDescCount; ++i)
             this.textureDescs.push(new TextureDesc(s));
 
@@ -592,7 +599,8 @@ class LevelObject {
     public header: ObjectEntry;
     public meshContainers: MeshContainer[] = [];
     public textureContainer: TextureContainer;
-    public textures: Texture[] = [];
+    public texturesDiffuse: Texture[] = [];
+    public texturesUnk: Texture[] = [];
 }
 
 // function parseObject(stream: DataStream, scriptOffsets: (number[] | null)): Object {
@@ -602,7 +610,7 @@ class LevelObject {
 
 // TODO: move elsewhere
 export const SCRIPTS_EXPORT = false;
-export const MESH_EXPORT = false;
+export const MESH_EXPORT = true;
 export const TEXTURES_EXPORT = true;
 export const SEPARATE_OBJECT_SUBMESHES = true;
 export const MESH_SCALE = 1 / 1000.0;
@@ -625,7 +633,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
         console.log(`loaded ${pathBase}/${this.id} of size ${bin.byteLength}`);
 
-        let objectEntries = parseObjectEntries(s);
+        const objectEntries = parseObjectEntries(s);
         console.log(objectEntries);
 
         // TODO: refactor to func
@@ -735,7 +743,12 @@ class Sly2LevelSceneDesc implements SceneDesc {
             let descIdx = 0;
             for (let desc of texCont.textureDescs) {
                 for (let indices of desc.indices) {
-                    let makeTexture = (clutIndexIndex: number, imageIndexIndex: number) => {
+                    enum TextureType {
+                        Diffuse,
+                        Unk
+                    }
+
+                    let makeTexture = (clutIndexIndex: number, imageIndexIndex: number, type: TextureType) => {
                         const clutIndex = indices.clutIndices[clutIndexIndex];
                         const imageIndex = indices.imageIndices[imageIndexIndex];
 
@@ -747,25 +760,38 @@ class Sly2LevelSceneDesc implements SceneDesc {
                             console.warn(`warn: [id ${texEntryIdx}] imageIndex (${imageIndex}) out of bounds, skipping`);
                             return;
                         }
-                        let clutMeta = texCont.cluts[clutIndex];
-                        let imageMeta = texCont.images[imageIndex];
+                        const clutMeta = texCont.cluts[clutIndex];
+                        const imageMeta = texCont.images[imageIndex];
 
                         const width = imageMeta.width;
                         const height = imageMeta.height;
                         // console.log(`clutMeta: ${clutMeta.offset} imageMeta: ${imageMeta.offset}`);
                         // console.log(`w: ${width} h: ${height} C: ${hexzero(clutMeta.offset, 8)} I: ${hexzero(imageMeta.offset, 8)}`);
 
-                        const name = sprintf(`%d_%s %03d-%02d-%02d-%02d %03d-%03d Res %04dx%04d Clt %05X Img %06X Cols %03d`,
+                        let typeStr = '';
+                        switch (type) {
+                            case TextureType.Diffuse: typeStr = 'Dif'; break;
+                            case TextureType.Unk: typeStr = 'Unk'; break;
+                        }
+
+                        const name = sprintf(`%d_%s %03d-%02d-%02d-%02d %03d-%03d Res %04dx%04d Clt %05X Img %06X Cols %03d T %s`,
                             object.header.index, object.header.name, texEntryIdx, descIdx, clutIndexIndex, imageIndexIndex, clutIndex, imageIndex, width, height,
-                            clutMeta.dataOffset, imageMeta.dataOffset, clutMeta.entryCount);
+                            clutMeta.dataOffset, imageMeta.dataOffset, clutMeta.entryCount, typeStr);
                         console.info(name);
-                        console.log(`pal ${hexzero(clutMeta.data.byteLength)} ${hexzero(clutMeta.dataOffset)} img ${hexzero(imageMeta.data.byteLength)} ${hexzero(imageMeta.dataOffset)}`);
+                        // console.log(`pal ${hexzero(clutMeta.data.byteLength)} ${hexzero(clutMeta.dataOffset)} img ${hexzero(imageMeta.data.byteLength)} ${hexzero(imageMeta.dataOffset)}`);
 
                         const paletteBuf = clutMeta.data;
                         const imageBuf = imageMeta.data;
 
                         const texture = new Texture(texEntryIdx, paletteBuf, imageBuf, width, height, clutMeta.entryCount, clutMeta.formatSize, name);
-                        object.textures.push(texture);
+                        switch (type) {
+                            case TextureType.Diffuse:
+                                object.texturesDiffuse.push(texture);
+                                break;
+                            case TextureType.Unk:
+                                object.texturesUnk.push(texture);
+                                break;
+                        }
                     };
 
                     const clutCount = indices.clutIndices.length;
@@ -773,39 +799,32 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
                     const isNImgNPal = (clutCount == imageCount);
                     const is1Img1Pal = (clutCount == 1 && imageCount == 1);
-                    const is1ImgNPal = (clutCount == 1 && imageCount > 1);
+                    const is1ImgNPal = (imageCount == 1 && clutCount > 1);
                     const isNImgMPal = (!isNImgNPal && clutCount > 1 && imageCount > 1);
                     const isPalDoubleImg = (clutCount == imageCount * 2);
                     const isPalTripleImg = (clutCount == imageCount * 3);
 
                     if (is1Img1Pal) {
                         console.log(`1ImgMPal: ${texEntryIdx} ${clutCount} ${imageCount}`);
-                        makeTexture(0, 0);
+                        makeTexture(0, 0, TextureType.Diffuse);
                     } else if (is1ImgNPal) {
                         console.log(`1ImgMPal: ${texEntryIdx} ${clutCount} ${imageCount}`);
                         for (let clutIndexIndex = 0; clutIndexIndex < indices.clutIndices.length; ++clutIndexIndex) {
-                            makeTexture(clutIndexIndex, 0);
-                        }
-                    } else if (isPalDoubleImg) {
-                        console.log(`PalDoubleImg: ${texEntryIdx} ${clutCount} ${imageCount}`);
-                        for (let i = 0; i < indices.imageIndices.length; ++i) {
-                            makeTexture(i * 2 + 0, i);
-                            makeTexture(i * 2 + 1, i);
-                        }
-                    } else if (isPalTripleImg) {
-                        console.log(`PalTripleImg: ${texEntryIdx} ${clutCount} ${imageCount}`);
-                        for (let i = 0; i < indices.imageIndices.length; ++i) {
-                            makeTexture(i * 3 + 0, i);
-                            makeTexture(i * 3 + 1, i);
-                            makeTexture(i * 3 + 2, i);
+                            const type = clutIndexIndex == 0 ? TextureType.Diffuse : TextureType.Unk;
+                            makeTexture(clutIndexIndex, 0, type);
                         }
                     } else if (isNImgMPal) {
                         console.error(`NImgMPal: ${texEntryIdx} ${clutCount} ${imageCount}`);
                         if (!Number.isInteger(clutCount / imageCount)) {
                             console.warn(`NImgMPal: nonint ${texEntryIdx} ${clutCount} ${imageCount}`);
+                            makeTexture(0, 0, TextureType.Diffuse);
+                            continue;
                         }
-                        // Use first ones
-                        makeTexture(0, 0);
+                        const ratio = clutCount / imageCount;
+                        for (let i = 0; i < clutCount; ++i) {
+                            const type = i == 0 ? TextureType.Diffuse : TextureType.Unk;
+                            makeTexture(i, Math.floor(i / ratio), type);
+                        }
                     }
 
                     descIdx++;
@@ -830,8 +849,10 @@ class Sly2LevelSceneDesc implements SceneDesc {
                 }));
             };
 
-            for (let object of objects)
-                await dumpTextures(object.textures);
+            for (let object of objects) {
+                await dumpTextures(object.texturesDiffuse);
+                await dumpTextures(object.texturesUnk);
+            }
 
             console.log(zipFileEntries);
 
@@ -840,18 +861,18 @@ class Sly2LevelSceneDesc implements SceneDesc {
         }
 
         if (MESH_EXPORT) {
-            let obj_str = "";
+            let obj_str = `mtllib ${this.id}.mtl\n`;
 
             let face_idx_base = 1;
 
             let chunkTotalIdx = 0;
             for (let object of objects) {
                 for (let meshContainer of object.meshContainers) {
-                    let chunkIdx = 0;
-
+                    let meshIdx = 0;
                     for (let mesh of meshContainer.meshes) {
                         if (!SEPARATE_OBJECT_SUBMESHES)
                             obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero(mesh.offset)}\n`;
+
 
                         let meshInstanceMatrices = [mat4.create()];
 
@@ -860,6 +881,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
                         let instanceIdx = 0;
                         for (let meshInstanceMatrix of meshInstanceMatrices) {
+                            let chunkIdx = 0;
                             for (let chunk of mesh.chunks) {
                                 if (SEPARATE_OBJECT_SUBMESHES)
                                     obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkIdx}_${instanceIdx}_${chunkTotalIdx}_${hexzero(mesh.offset)}\n`;
@@ -868,7 +890,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
                                     for (let i = 0; i < chunk.positions.length; i += 3) {
                                         const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
 
-                                        let scaledPos = vec3.fromValues(
+                                        const scaledPos = vec3.fromValues(
                                             pos[0] * MESH_SCALE,
                                             pos[1] * MESH_SCALE,
                                             pos[2] * MESH_SCALE);
@@ -899,10 +921,15 @@ class Sly2LevelSceneDesc implements SceneDesc {
                                 }
 
                                 for (let i = 0; i < chunk.texCoords.length; i += 2) {
-                                    let texCoord = vec2.fromValues(chunk.texCoords[i], chunk.texCoords[i + 1]);
+                                    const texCoord = vec2.fromValues(chunk.texCoords[i], chunk.texCoords[i + 1]);
 
                                     obj_str += `vt ${texCoord[0]} ${texCoord[1]}\n`;
                                 }
+                                const szme = mesh.szme.chunks[chunkIdx];
+                                if (szme.textureId)
+                                    obj_str += `usemtl ${szme!.textureId}\n`
+                                else
+                                    obj_str += `usemtl empty\n`;
 
                                 for (let i = 0; i < chunk.trianglesIndices1.length; i += 3) {
                                     const f0 = face_idx_base + chunk.trianglesIndices1[i + 0];
@@ -925,11 +952,23 @@ class Sly2LevelSceneDesc implements SceneDesc {
                             }
                             instanceIdx++;
                         }
+                        meshIdx++;
                     }
                 }
             }
 
             downloadText(`${this.id}.obj`, obj_str);
+
+            let mat_str = 'newmtl empty\n';
+
+            for (let object of objects) {
+                for (let texture of object.texturesDiffuse) {
+                    mat_str += `newmtl ${texture.texEntryIdx}\n`;
+                    mat_str += `map_Kd ${this.id}_textures/${texture.name}.png\n`;
+                }
+            }
+
+            downloadText(`${this.id}.mtl`, mat_str);
         }
 
         const renderer = new Sly2Renderer(device);
