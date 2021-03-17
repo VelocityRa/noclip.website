@@ -66,7 +66,8 @@ class SzmeK13 {
 }
 
 class SzmeChunk {
-    public textureId: (number | null) = null;
+    public textureId0: (number | null) = null;
+    public textureId1: (number | null) = null;
 
     constructor(s: DataStream, flags: number, instanceCount: number, e2Count: number, i0: number) {
         const a0Count = s.u8();
@@ -79,7 +80,9 @@ class SzmeChunk {
             const a0z = s.u32();
 
             if (i == 0)
-                this.textureId = a0y;
+                this.textureId0 = a0y;
+            else if (i == 1)
+                this.textureId1 = a0y;
 
             a0UnkCount += a0x;
         }
@@ -611,9 +614,9 @@ class LevelObject {
 // TODO: move elsewhere
 export const SCRIPTS_EXPORT = false;
 export const MESH_EXPORT = true;
-export const TEXTURES_EXPORT = true;
+export const TEXTURES_EXPORT = false;
 export const SEPARATE_OBJECT_SUBMESHES = true;
-export const MESH_SCALE = 1 / 1000.0;
+export const MESH_SCALE = 1 / 100.0;
 
 class Sly2LevelSceneDesc implements SceneDesc {
     constructor(
@@ -926,8 +929,9 @@ class Sly2LevelSceneDesc implements SceneDesc {
                                     obj_str += `vt ${texCoord[0]} ${texCoord[1]}\n`;
                                 }
                                 const szme = mesh.szme.chunks[chunkIdx];
-                                if (szme.textureId)
-                                    obj_str += `usemtl ${szme!.textureId}\n`
+
+                                if (szme.textureId0)
+                                    obj_str += `usemtl ${object.header.index}_${szme!.textureId0}\n`
                                 else
                                     obj_str += `usemtl empty\n`;
 
@@ -938,6 +942,11 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
                                     obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
                                 }
+
+                                if (szme.textureId1)
+                                    obj_str += `usemtl ${object.header.index}_${szme!.textureId1}\n`
+                                else
+                                    obj_str += `usemtl empty\n`;
                                 for (let i = 0; i < chunk.trianglesIndices2.length; i += 3) {
                                     const f0 = face_idx_base + chunk.trianglesIndices2[i + 0];
                                     const f1 = face_idx_base + chunk.trianglesIndices2[i + 1];
@@ -963,8 +972,12 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
             for (let object of objects) {
                 for (let texture of object.texturesDiffuse) {
-                    mat_str += `newmtl ${texture.texEntryIdx}\n`;
-                    mat_str += `map_Kd ${this.id}_textures/${texture.name}.png\n`;
+                    mat_str += `newmtl ${object.header.index}_${texture.texEntryIdx}\n`;
+
+                    const texFilename = `${this.id}_textures/${texture.name}.png`;
+                    mat_str += `map_Kd ${texFilename}\n`;
+                    if (!texture.isFullyOpaque)
+                        mat_str += `map_D ${texFilename}\n`;
                 }
             }
 
