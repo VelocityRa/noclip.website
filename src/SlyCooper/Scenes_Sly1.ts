@@ -294,7 +294,11 @@ class Sly1LevelSceneDesc implements SceneDesc {
                 for (let texture of this.texturesDiffuse) {
                     if (texture) {
                         mat_str += `newmtl ${texture.texEntryIdx}\n`;
-                        mat_str += `map_Kd ${this.id}_textures/${texture.name}.png\n`;
+
+                        const texFilename = `${this.id}_textures/${texture.name}.png`;
+                        mat_str += `map_Kd ${texFilename}\n`;
+                        if (!texture.isFullyOpaque)
+                            mat_str += `map_D ${texFilename}\n`;
                     }
                 }
 
