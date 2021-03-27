@@ -177,6 +177,9 @@ interface MeshChunk {
 
 // TODO: is u6 & g4 texture ID?
 
+// TODO: type==3 p6 p5 is tristrip
+// TODO: maybe u9 is local offset?
+
 class Mesh {
     static readonly szmsMagic = 0x534D5A53; // "SZMS"
     static readonly szmeMagic = 0x454d5a53; // "SZME"
@@ -464,7 +467,7 @@ class MeshContainer {
         s.skip(1);
 
         const meshCount = s.u16();
-        console.log(`meshCount: ${meshCount}`);
+        // console.log(`meshCount: ${meshCount}`);
         let meshIndex = 0;
         while (meshIndex < meshCount) {
             const mesh = new Mesh(s, this, meshIndex, i0);
@@ -582,7 +585,7 @@ class TextureContainer {
         for (let i = 0; i < textureDescCount; ++i)
             this.textureDescs.push(new TextureDesc(s));
 
-        console.log(`[${hexzero(s.offs)}] ${clutCount} ${imageCount}`);
+        // console.log(`[${hexzero(s.offs)}] ${clutCount} ${imageCount}`);
 
         s.align(0x10);
         const data = s.buf(dataSize);
@@ -613,7 +616,7 @@ class LevelObject {
 
 // TODO: move elsewhere
 export const SCRIPTS_EXPORT = false;
-export const MESH_EXPORT = true;
+export const MESH_EXPORT = false;
 export const TEXTURES_EXPORT = false;
 export const SEPARATE_OBJECT_SUBMESHES = true;
 export const MESH_SCALE = 1 / 100.0;
@@ -687,7 +690,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
             object.header = objectEntry;
             object.offset = objectOffset;
 
-            let obj_log = `${leftPad(objectEntry.name, 32, ' ')} #${leftPad(`${objectEntry.count}`, 2)} | TEX `;
+            let objLog = `${leftPad(objectEntry.name, 32, ' ')} #${leftPad(`${objectEntry.count}`, 2)} | TEX `;
             let hasTex = false;
             while (textureIndex < this.textureDescOffsets.length) {
                 let textureDescOffset = this.textureDescOffsets[textureIndex];
@@ -698,15 +701,15 @@ class Sly2LevelSceneDesc implements SceneDesc {
                 s.offs = textureDescOffset;
                 object.textureContainer = new TextureContainer(s, textureSize);
 
-                obj_log += `${hexzero(textureDescOffset)}, `
+                objLog += `${hexzero(textureDescOffset)}, `
                 hasTex = true;
 
                 ++textureIndex;
             }
             if (hasTex)
-                obj_log = obj_log.substring(0, obj_log.length - 2);
+                objLog = objLog.substring(0, objLog.length - 2);
 
-            obj_log += ` | MESH `;
+            objLog += ` | MESH `;
             let hasMeshcont = false;
             while (meshContIndex < this.meshcontOffsets.length) {
                 let meshcontOffset = this.meshcontOffsets[meshContIndex];
@@ -718,19 +721,24 @@ class Sly2LevelSceneDesc implements SceneDesc {
                 try {
                     let meshContainer = new MeshContainer(s, meshContIndex)
                     object.meshContainers.push(meshContainer);
+                    objLog += `[`;
+                    for (let mesh of meshContainer.meshes)
+                        objLog += `${mesh.type},`;
+                    if (meshContainer.meshes.length > 0)
+                        objLog = objLog.substring(0, objLog.length - 1);
+                    objLog += `]${hexzero(meshcontOffset)}, `
                 } catch (error) {
                     console.error(`obj \'${objectEntry.name}\' mcont @ ${hexzero0x(meshcontOffset)} id ${meshContIndex}: ${error}`);
                 }
 
-                obj_log += `${hexzero(meshcontOffset)}, `
                 hasMeshcont = true;
 
                 ++meshContIndex;
             }
             if (hasMeshcont)
-                obj_log = obj_log.substring(0, obj_log.length - 2);
+                objLog = objLog.substring(0, objLog.length - 2);
 
-            console.log(obj_log);
+            console.log(objLog);
 
             objects.push(object);
         }
