@@ -18,11 +18,12 @@ import { sprintf } from "./sprintf";
 
 const pathBase = `Sly2`;
 
-// Research at: https://github.com/VelocityRa/SlyTools/blob/main/templates/sly2_ps3_meshes.bt
+// Research at: https://github.com/VelocityRa/SlyTools/blob/main/templates/sly2_ps3_level.bt
 
 let enc = new TextEncoder();
 
-// TODO: move to other file
+// TODO: move shit to other files
+
 interface ObjectEntry {
     index: number;
     name: string;
@@ -175,6 +176,11 @@ interface MeshChunk {
     name: string; // for debugging
 }
 
+
+interface MeshC2Entry {
+    transformMatrix: (mat4 | null);
+}
+
 // TODO: is u6 & g4 texture ID?
 
 // TODO: type==3 p6 p5 is tristrip
@@ -197,6 +203,8 @@ class Mesh {
     public instanceCount: number;
     public instances: mat4[] = [];
 
+    public containerInstanceMatrixIndex: number;
+
     constructor(s: DataStream, public readonly container: MeshContainer, public meshIndex: number, i0: number) {
         this.offset = s.offs;
 
@@ -205,7 +213,8 @@ class Mesh {
         if (this.u0 == 0) {
             this.type = s.u8();
             this.instanceCount = s.u16();
-            s.skip(2 + 1);
+            this.containerInstanceMatrixIndex = s.u16();
+            s.skip(1);
             const u4 = s.f32();
             const u5 = s.f32();
             const u6 = s.u32();
@@ -395,10 +404,10 @@ class MeshContainer {
     public meshes: Mesh[] = [];
     public offset: number;
 
+    public meshC2Entries: MeshC2Entry[] = [];
+
     constructor(s: DataStream, public containerIndex: number) {
         this.offset = s.offs;
-
-        // debugger;
 
         const c2Count = s.u16();
         for (let i = 0; i < c2Count; ++i) {
@@ -426,20 +435,22 @@ class MeshContainer {
             if ((flags & 0x20) != 0) {
                 s.skip(3 * 4);
             }
+            let transformMatrix: (mat4 | null) = null;
             if (c4 < 0x10) {
                 let uVar8 = 1 << (c4 & 0x7F);
                 if ((uVar8 & 0xA001) == 0) {
                     if ((uVar8 & 0x4100) == 0) {
-                        s.skip(3 * 4 * 4);
+                        transformMatrix = s.mat4();
                     } else {
                         s.skip(2);
                     }
                 } else {
-                    s.skip(3 * 4 * 4);
+                    transformMatrix = s.mat4();
                 }
             } else {
-                s.skip(3 * 4 * 4);
+                transformMatrix = s.mat4();
             }
+            this.meshC2Entries.push({ transformMatrix });
         }
 
         const caCount = s.u8();
@@ -884,11 +895,23 @@ class Sly2LevelSceneDesc implements SceneDesc {
                         if (!SEPARATE_OBJECT_SUBMESHES)
                             obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero(mesh.offset)}\n`;
 
-
                         let meshInstanceMatrices = [mat4.create()];
 
                         for (let meshInstance of mesh.instances)
                             meshInstanceMatrices.push(meshInstance);
+
+                        if (mesh.u0 == 0) {
+                            let transformC2 = meshContainer.meshC2Entries[mesh.containerInstanceMatrixIndex].transformMatrix;
+
+                            if (transformC2) {
+                                meshInstanceMatrices = meshInstanceMatrices.map(
+                                    instMatrix => {
+                                        // TODO: change order?
+                                        mat4.multiply(instMatrix, instMatrix, transformC2!);
+                                        return instMatrix;
+                                    });
+                            }
+                        }
 
                         let instanceIdx = 0;
                         for (let meshInstanceMatrix of meshInstanceMatrices) {
@@ -897,32 +920,19 @@ class Sly2LevelSceneDesc implements SceneDesc {
                                 if (SEPARATE_OBJECT_SUBMESHES)
                                     obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkIdx}_${instanceIdx}_${chunkTotalIdx}_${hexzero(mesh.offset)}\n`;
 
-                                if (instanceIdx == 0) {
-                                    for (let i = 0; i < chunk.positions.length; i += 3) {
-                                        const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
+                                let newPos = vec3.create();
 
-                                        const scaledPos = vec3.fromValues(
-                                            pos[0] * MESH_SCALE,
-                                            pos[1] * MESH_SCALE,
-                                            pos[2] * MESH_SCALE);
+                                for (let i = 0; i < chunk.positions.length; i += 3) {
+                                    const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
 
-                                        obj_str += `v ${scaledPos[0]} ${scaledPos[1]} ${scaledPos[2]}\n`;
-                                    }
-                                } else {
-                                    let newPos = vec3.create();
+                                    vec3.transformMat4(newPos, pos, meshInstanceMatrix);
 
-                                    for (let i = 0; i < chunk.positions.length; i += 3) {
-                                        const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
+                                    let scaledPos = vec3.fromValues(
+                                        newPos[0] * MESH_SCALE,
+                                        newPos[1] * MESH_SCALE,
+                                        newPos[2] * MESH_SCALE);
 
-                                        vec3.transformMat4(newPos, pos, meshInstanceMatrix);
-
-                                        let scaledPos = vec3.fromValues(
-                                            newPos[0] * MESH_SCALE,
-                                            newPos[1] * MESH_SCALE,
-                                            newPos[2] * MESH_SCALE);
-
-                                        obj_str += `v ${scaledPos[0]} ${scaledPos[1]} ${scaledPos[2]}\n`;
-                                    }
+                                    obj_str += `v ${scaledPos[0]} ${scaledPos[1]} ${scaledPos[2]}\n`;
                                 }
 
                                 for (let i = 0; i < chunk.normals.length; i += 3) {
