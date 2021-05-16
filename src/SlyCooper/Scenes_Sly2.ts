@@ -1,5 +1,5 @@
 import ArrayBufferSlice from '../ArrayBufferSlice';
-import { mat4, vec2, vec3 } from 'gl-matrix';
+import { mat4, vec2, vec3, quat } from 'gl-matrix';
 import { SceneGroup, SceneDesc, SceneGfx, ViewerRenderInput } from "../viewer";
 import * as Viewer from "../viewer";
 import { GfxDevice } from "../gfx/platform/GfxPlatform";
@@ -8,13 +8,14 @@ import { IS_DEVELOPMENT } from "../BuildVersion";
 import { assert, hexzero, hexzero0x, leftPad, spacePad } from '../util';
 import { NamedArrayBufferSlice } from "../DataFetcher";
 import { downloadCanvasAsPng, downloadText } from "../DownloadUtils";
-import { range, range_end } from '../MathHelpers';
+import { range, range_end, transformVec3Mat4w1 } from '../MathHelpers';
 import { downloadBuffer } from '../DownloadUtils';
 import { makeZipFile, ZipFileEntry } from '../ZipFile';
 import { Sly2Renderer } from './Sly2Renderer';
 import { Texture } from './SlyData';
 import { DataStream } from "./DataStream";
 import { sprintf } from "./sprintf";
+import { Accessor, Document, WebIO, Node as GLTFNode, Mesh as GLTFMesh, Material as GLTFMaterial } from '@gltf-transform/core';
 
 const pathBase = `Sly2`;
 
@@ -177,6 +178,8 @@ interface MeshChunk {
     unkIndices2: Uint16Array;
 
     name: string; // for debugging
+
+    gltfMesh: (GLTFMesh | null);
 }
 
 
@@ -345,9 +348,11 @@ class Mesh {
 
                     let name = `SZMS ${hexzero(meshAddr, 6)} ${submeshCount} | ${hexzero(submeshAddr)}`;
 
+                    let gltfMesh = null;
+
                     this.chunks.push({
-                        positions, normals, texCoords, vertexColor, vertexColorFloats,
-                        trianglesIndices1, unkIndices1, trianglesIndices2, unkIndices2, name
+                        positions, normals, texCoords, vertexColor, vertexColorFloats, trianglesIndices1,
+                        unkIndices1, trianglesIndices2, unkIndices2, name, gltfMesh
                     });
                 }
                 this.szme = new Szme(s, this.instanceCount, i0);
@@ -642,12 +647,19 @@ class DynamicObjectInstance {
 // TODO: move elsewhere
 export const SCRIPTS_EXPORT = false;
 export const TEXTURES_EXPORT = false;
+
 export const MESH_EXPORT = false;
+export const MESH_EXPORT_MATERIALS = false;
+
+export const MESH_EXPORT_GLTF_OLD = false;
 export const MESH_EXPORT_GLTF = true;
+export const MESH_EXPORT_GLTF_MATERIALS = false;
+
 export const MESH_SEPARATE_TO_OBJECTS = true;
-export const MESH_SEPARATE_OBJECT_CHUNKS = true;
-export const MESH_EXPORT_MATERIALS = true;
+export const MESH_SEPARATE_ONLY_OBJECTS = false;
+export const MESH_SEPARATE_OBJECT_CHUNKS = false;
 export const MESH_SCALE = 1 / 100.0;
+
 export const LOG_OFFSETS_FOR_010_EDITOR = true;
 
 class Sly2LevelSceneDesc implements SceneDesc {
@@ -953,8 +965,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
         if (MESH_EXPORT) {
             let obj_str = "";
-            if (MESH_EXPORT_MATERIALS)
-                obj_str += `mtllib ${this.id}.mtl\n`;
+            obj_str += `mtllib ${this.id}.mtl\n`;
 
             obj_str += `g all\n`;
             obj_str += `s off\n`;
@@ -963,14 +974,17 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
             let chunkTotalIdx = 0;
             for (let object of objects) {
-                // if (object.header.index == 286)
+                if (MESH_SEPARATE_TO_OBJECTS && MESH_SEPARATE_ONLY_OBJECTS)
+                    obj_str += `o [${object.header.index}]${object.header.name}\n`;
+
+                // if (object.header.index != 280)
                 //     continue;
 
                 for (let meshContainer of object.meshContainers) {
                     let meshIdx = 0;
 
                     for (let mesh of meshContainer.meshes) {
-                        if (MESH_SEPARATE_TO_OBJECTS && !MESH_SEPARATE_OBJECT_CHUNKS)
+                        if (MESH_SEPARATE_TO_OBJECTS && !MESH_SEPARATE_ONLY_OBJECTS && !MESH_SEPARATE_OBJECT_CHUNKS)
                             obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero(mesh.offset)}\n`;
 
                         let meshInstanceMatrices = [mat4.create()];
@@ -1003,7 +1017,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
                         for (let meshInstanceMatrix of meshInstanceMatrices) {
                             let chunkIdx = 0;
                             for (let chunk of mesh.chunks) {
-                                if (MESH_SEPARATE_TO_OBJECTS && MESH_SEPARATE_OBJECT_CHUNKS)
+                                if (MESH_SEPARATE_TO_OBJECTS && !MESH_SEPARATE_ONLY_OBJECTS && MESH_SEPARATE_OBJECT_CHUNKS)
                                     obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkIdx}_${instanceIdx}_${chunkTotalIdx}_${hexzero(mesh.offset)}\n`;
 
                                 let newPos = vec3.create();
@@ -1087,6 +1101,410 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
                 downloadText(`${this.id}.mtl`, mat_str);
             }
+        }
+
+
+        if (MESH_EXPORT_GLTF) {
+            const io = new WebIO({ credentials: 'include' });
+
+            let doc = new Document();
+            let rootMatrix = mat4.create();
+            mat4.fromRotationTranslationScale(rootMatrix,
+                quat.fromEuler(quat.create(), -90, 0, 0), [0, 0, 0], [MESH_SCALE, MESH_SCALE, MESH_SCALE]);
+            let mainScene = doc.createScene(`${this.id}`);
+
+            let texIdToMaterialMap = new Map<string, GLTFMaterial>();
+
+            const addTexturesAndMaterials = async (object: LevelObject, textures: (Texture | null)[]) => {
+                await Promise.all(textures.filter((texture) => texture !== null).map(async (texture) => {
+                    const surface = texture!.toCanvas().surfaces[0];
+                    const blob: (Blob | null) = await new Promise((resolve, reject) => {
+                        surface.toBlob((blob: Blob | null) => blob !== null ? resolve(blob) : reject(null));
+                    });
+                    if (blob) {
+                        const data = await blob.arrayBuffer();
+                        // zipFileEntries.push({ filename: texture!.name + '.png', data: new ArrayBufferSlice(data) });
+
+                        let baseColTex = doc.createTexture(`${texture!.name}`)
+                            .setMimeType('image/png')
+                            .setImage(data);
+                        let material = doc.createMaterial(`${object.header.index}_${object.header.name}_${texture!.name}`)
+                            .setBaseColorTexture(baseColTex);
+
+                        texIdToMaterialMap.set(`${object.header.index}_${texture!.texEntryIdx}`, material);
+                    }
+                }));
+            };
+
+            if (MESH_EXPORT_GLTF_MATERIALS) {
+                for (let object of objects) {
+                    await addTexturesAndMaterials(object, object.texturesDiffuse);
+                    // await addTexturesAndMaterials(object, object.texturesUnk);
+                }
+            }
+
+            const getTRS = (m: mat4) => {
+                return { t: mat4.getTranslation(vec3.create(), m), r: mat4.getRotation(quat.create(), m), s: mat4.getScaling(vec3.create(), m) };
+            };
+
+            const setNodeMatrix = (node: GLTFNode, mat: mat4) => {
+                let trs = getTRS(mat);
+                node.setTranslation([trs.t[0], trs.t[1], trs.t[2]]);
+                quat.normalize(trs.r, trs.r);
+                node.setRotation([trs.r[0], trs.r[1], trs.r[2], trs.r[3]]);
+                node.setScale([trs.s[0], trs.s[1], trs.s[2]]);
+            }
+
+            const globalBuffer = doc.createBuffer();
+
+            let chunkTotalIdx = 0;
+
+            for (let object of objects) {
+                // let objNode = doc.createNode(`obj: [${object.header.index}] ${object.header.name}`);
+                // setNodeMatrix(objNode, dynInstMat);
+                // rootNode.addChild(objNode);
+
+                // if (object.header.index != 280)
+                //     continue;
+
+                for (let meshContainer of object.meshContainers) {
+                    let meshIdx = 0;
+
+                    for (let mesh of meshContainer.meshes) {
+                        let meshInstanceMatrices = [mat4.create()];
+
+                        for (let meshInstance of mesh.instances)
+                            meshInstanceMatrices.push(mat4.clone(meshInstance));
+
+                        // TODO: This is slow!
+                        let dynObjects: mat4[] = [];
+                        for (let dynObjInst of dynObjectInsts) {
+                            if (object.header.id0 == dynObjInst.objId0) {
+                                dynObjects.push(dynObjInst.matrix);
+                            }
+                        }
+                        for (let dynObjInstance of dynObjects)
+                            meshInstanceMatrices.push(mat4.clone(dynObjInstance));
+
+                        if (mesh.u0 == 0) {
+                            let transformC2 = meshContainer.meshC2Entries[mesh.containerInstanceMatrixIndex].transformMatrix;
+
+                            if (transformC2) {
+                                for (let i = 0; i < meshInstanceMatrices.length; ++i) {
+                                    // TODO: change order?
+                                    mat4.multiply(meshInstanceMatrices[i], meshInstanceMatrices[i], transformC2!);
+                                }
+                            }
+                        }
+
+                        let instanceIdx = 0;
+                        for (let meshInstMatrix of meshInstanceMatrices) {
+                            let chunkIdx = 0;
+                            for (let chunk of mesh.chunks) {
+                                // let meshInstChunkNode = doc.createNode(`meshInstChunk: ${instanceIdx}`);
+                                // meshInstNode.addChild(meshInstChunkNode);
+
+                                if (!chunk.gltfMesh &&
+                                    chunk.positions.length && chunk.normals.length && chunk.texCoords.length &&
+                                    (chunk.trianglesIndices1.length || chunk.trianglesIndices2.length)) {
+                                    // todo: redundant creates ?
+
+                                    const szme = mesh.szme.chunks[chunkIdx];
+
+                                    const position = doc.createAccessor()
+                                        .setType(Accessor.Type.VEC3)
+                                        .setArray(chunk.positions)
+                                        .setBuffer(globalBuffer);
+                                    const normal = doc.createAccessor()
+                                        .setType(Accessor.Type.VEC3)
+                                        .setArray(chunk.normals)
+                                        .setBuffer(globalBuffer);
+                                    const texcoord = doc.createAccessor()
+                                        .setType(Accessor.Type.VEC2)
+                                        .setArray(chunk.texCoords)
+                                        .setBuffer(globalBuffer);
+
+                                    const prim = doc.createPrimitive()
+                                        .setAttribute('POSITION', position)
+                                        .setAttribute('NORMAL', normal)
+                                        .setAttribute('TEXCOORD_0', texcoord);
+
+                                    let meshGltf = doc.createMesh();
+
+                                    if (chunk.trianglesIndices1.length) {
+                                        const indices1 = doc.createAccessor()
+                                            .setType(Accessor.Type.SCALAR)
+                                            .setArray(chunk.trianglesIndices1)
+                                            .setBuffer(globalBuffer);
+                                        const mat1 = !MESH_EXPORT_GLTF_MATERIALS ? null :
+                                            texIdToMaterialMap.get(`${object.header.index}_${szme!.textureId0}`) || null;
+                                        const prim1 = prim.clone()
+                                            .setMaterial(mat1)
+                                            .setIndices(indices1);
+                                        meshGltf.addPrimitive(prim1);
+                                    }
+                                    if (chunk.trianglesIndices2.length) {
+                                        const indices2 = doc.createAccessor()
+                                            .setType(Accessor.Type.SCALAR)
+                                            .setArray(chunk.trianglesIndices2)
+                                            .setBuffer(globalBuffer);
+                                        const mat2 = !MESH_EXPORT_GLTF_MATERIALS ? null :
+                                            texIdToMaterialMap.get(`${object.header.index}_${szme!.textureId1}`) || null;
+                                        const prim2 = prim.clone()
+                                            .setMaterial(mat2)
+                                            .setIndices(indices2);
+                                        meshGltf.addPrimitive(prim2);
+                                    }
+
+                                    chunk.gltfMesh = meshGltf;
+                                }
+
+                                let meshInstNode = doc.createNode()
+                                    .setName(`${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkIdx}_${instanceIdx}_${chunkTotalIdx}_${hexzero(mesh.offset)}`);
+                                meshInstNode.setMesh(chunk.gltfMesh);
+
+                                let meshInstMatrixFinal = mat4.multiply(mat4.create(), rootMatrix, meshInstMatrix);
+                                setNodeMatrix(meshInstNode, meshInstMatrixFinal);
+                                mainScene.addChild(meshInstNode);
+
+                                chunkIdx++;
+                                chunkTotalIdx++;
+                            }
+                            instanceIdx++;
+                        }
+                        meshIdx++;
+                    }
+                }
+            }
+
+            const glb = io.writeBinary(doc);
+            downloadBuffer(`${this.id}.glb`, glb);
+        }
+
+        // testing
+        if (MESH_EXPORT_GLTF_OLD) {
+            const io = new WebIO({ credentials: 'include' });
+
+            let doc = new Document();
+            let rootMatrix = mat4.create();
+            let r = quat.create();
+            mat4.fromRotationTranslationScale(rootMatrix,
+                quat.fromEuler(r, -90, 0, 0), [0, 0, 0], [MESH_SCALE, MESH_SCALE, MESH_SCALE]);
+            let mainScene = doc.createScene(`${this.id}`);
+
+            let texIdToMaterialMap = new Map<string, GLTFMaterial>();
+
+            const addTexturesAndMaterials = async (object: LevelObject, textures: (Texture | null)[]) => {
+                await Promise.all(textures.filter((texture) => texture !== null).map(async (texture) => {
+                    const surface = texture!.toCanvas().surfaces[0];
+                    const blob: (Blob | null) = await new Promise((resolve, reject) => {
+                        surface.toBlob((blob: Blob | null) => blob !== null ? resolve(blob) : reject(null));
+                    });
+                    if (blob) {
+                        const data = await blob.arrayBuffer();
+                        // zipFileEntries.push({ filename: texture!.name + '.png', data: new ArrayBufferSlice(data) });
+
+                        let baseColTex = doc.createTexture(`${texture!.name}`)
+                            .setMimeType('image/png')
+                            .setImage(data);
+                        let material = doc.createMaterial(`${object.header.index}_${object.header.name}_${texture!.name}`)
+                            .setBaseColorTexture(baseColTex);
+
+                        texIdToMaterialMap.set(`${object.header.index}_${texture!.texEntryIdx}`, material);
+                    }
+                }));
+            };
+
+            if (MESH_EXPORT_GLTF_MATERIALS) {
+                for (let object of objects) {
+                    await addTexturesAndMaterials(object, object.texturesDiffuse);
+                    // await addTexturesAndMaterials(object, object.texturesUnk);
+                }
+            }
+
+            const objIdxToObjDynInstMatsMap = new Map<number, mat4[]>();
+            for (const dynObjInst of dynObjectInsts) {
+                for (const object of objects) {
+                    if (object.header.id0 == dynObjInst.objId0) {
+                        const matArray = objIdxToObjDynInstMatsMap.get(object.header.index);
+
+                        if (matArray) {
+                            matArray.push(dynObjInst.matrix);
+                        } else {
+                            objIdxToObjDynInstMatsMap.set(object.header.index, [dynObjInst.matrix]);
+                        }
+
+                        break;
+                    }
+                }
+            }
+
+            const getTRS = (m: mat4) => {
+                let t = vec3.create(); let r = quat.create(); let s = vec3.create();
+                return { t: mat4.getTranslation(t, m), r: mat4.getRotation(r, m), s: mat4.getScaling(s, m) };
+            };
+
+            const setNodeMatrix = (node: GLTFNode, mat: mat4) => {
+                let trs = getTRS(mat);
+                node.setTranslation([trs.t[0], trs.t[1], trs.t[2]]);
+                quat.normalize(trs.r, trs.r);
+                node.setRotation([trs.r[0], trs.r[1], trs.r[2], trs.r[3]]);
+                node.setScale([trs.s[0], trs.s[1], trs.s[2]]);
+            }
+
+            const globalBuffer = doc.createBuffer();
+
+            let chunkTotalIdx = 0;
+
+            let emitObject = (object: LevelObject, dynInstMat: (mat4 | null) = null) => {
+                // if (object.header.index != 269)
+                //     return;
+
+                // let objNode = doc.createNode(`obj: [${object.header.index}] ${object.header.name}`);
+                // setNodeMatrix(objNode, dynInstMat);
+                // rootNode.addChild(objNode);
+
+                for (let meshContainer of object.meshContainers) {
+                    // let meshContNode = doc.createNode(`mco: [${meshContainer.containerIndex}] ${hexzero(meshContainer.offset)}`);
+                    // objNode.addChild(meshContNode);
+
+                    let meshIdx = 0;
+                    for (let mesh of meshContainer.meshes) {
+                        // let meshNode = doc.createNode(`mesh: [${mesh.meshIndex}] T${mesh.type} ${hexzero(mesh.offset)}`);
+                        // meshContNode.addChild(meshNode);
+
+                        // todo: do mesh instancing/cache at this level. solves instancing problem
+
+                        let meshInstanceMatrices = [mat4.create()];
+
+                        meshInstanceMatrices = meshInstanceMatrices.concat([...mesh.instances]);
+
+                        let transformC2: (mat4 | null) = null;
+                        if (mesh.u0 == 0) {
+                            transformC2 = meshContainer.meshC2Entries[mesh.containerInstanceMatrixIndex].transformMatrix;
+
+                            // if (transformC2) {
+                            //     for (let i = 0; i < meshInstanceMatrices.length; ++i) {
+                            //         mat4.multiply(meshInstanceMatrices[i], meshInstanceMatrices[i], transformC2!);
+                            //         // mat4.multiply(meshInstanceMatrices[i], transformC2!, meshInstanceMatrices[i]);
+                            //     }
+                            // }
+                        }
+
+                        let instanceIdx = 0;
+                        for (let meshInstanceMatrix of meshInstanceMatrices) {
+                            // let meshInstNode = doc.createNode(`meshInst: ${instanceIdx}`);
+                            // setNodeMatrix(meshInstNode, meshInstanceMatrix);
+                            // meshNode.addChild(meshInstNode);
+
+                            let meshInstMatrix = mat4.create();
+                            if (transformC2)
+                                mat4.multiply(meshInstMatrix, transformC2!, meshInstMatrix);
+                            if (dynInstMat)
+                                mat4.multiply(meshInstMatrix, dynInstMat!, meshInstMatrix);
+                            else
+                                mat4.multiply(meshInstMatrix, meshInstanceMatrix, meshInstMatrix);
+                            mat4.multiply(meshInstMatrix, rootMatrix, meshInstMatrix);
+
+                            let chunkIdx = 0;
+                            for (let chunk of mesh.chunks) {
+                                // let meshInstChunkNode = doc.createNode(`meshInstChunk: ${instanceIdx}`);
+                                // meshInstNode.addChild(meshInstChunkNode);
+
+                                if (!chunk.gltfMesh &&
+                                    chunk.positions.length && chunk.normals.length && chunk.texCoords.length &&
+                                    (chunk.trianglesIndices1.length || chunk.trianglesIndices2.length)) {
+                                    // todo: redundant creates ?
+
+                                    const szme = mesh.szme.chunks[chunkIdx];
+
+                                    const position = doc.createAccessor()
+                                        .setType(Accessor.Type.VEC3)
+                                        .setArray(chunk.positions)
+                                        .setBuffer(globalBuffer);
+                                    const normal = doc.createAccessor()
+                                        .setType(Accessor.Type.VEC3)
+                                        .setArray(chunk.normals)
+                                        .setBuffer(globalBuffer);
+                                    const texcoord = doc.createAccessor()
+                                        .setType(Accessor.Type.VEC2)
+                                        .setArray(chunk.texCoords)
+                                        .setBuffer(globalBuffer);
+
+                                    const prim = doc.createPrimitive()
+                                        .setAttribute('POSITION', position)
+                                        .setAttribute('NORMAL', normal)
+                                        .setAttribute('TEXCOORD_0', texcoord);
+
+                                    let meshGltf = doc.createMesh();
+
+                                    if (chunk.trianglesIndices1.length) {
+                                        const indices1 = doc.createAccessor()
+                                            .setType(Accessor.Type.SCALAR)
+                                            .setArray(chunk.trianglesIndices1)
+                                            .setBuffer(globalBuffer);
+                                        const mat1 = !MESH_EXPORT_GLTF_MATERIALS ? null :
+                                            texIdToMaterialMap.get(`${object.header.index}_${szme!.textureId0}`) || null;
+                                        const prim1 = prim.clone()
+                                            .setMaterial(mat1)
+                                            .setIndices(indices1);
+                                        meshGltf.addPrimitive(prim1);
+                                    }
+                                    if (chunk.trianglesIndices2.length) {
+                                        const indices2 = doc.createAccessor()
+                                            .setType(Accessor.Type.SCALAR)
+                                            .setArray(chunk.trianglesIndices2)
+                                            .setBuffer(globalBuffer);
+                                        const mat2 = !MESH_EXPORT_GLTF_MATERIALS ? null :
+                                            texIdToMaterialMap.get(`${object.header.index}_${szme!.textureId1}`) || null;
+                                        const prim2 = prim.clone()
+                                            .setMaterial(mat2)
+                                            .setIndices(indices2);
+                                        meshGltf.addPrimitive(prim2);
+                                    }
+
+                                    chunk.gltfMesh = meshGltf;
+                                }
+
+                                // meshInstNode.setMesh(chunk.gltfMesh);
+
+                                let meshInstNode = doc.createNode()
+                                    .setName(`${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkIdx}_${instanceIdx}_${chunkTotalIdx}_${hexzero(mesh.offset)}`);
+                                meshInstNode.setMesh(chunk.gltfMesh);
+
+                                setNodeMatrix(meshInstNode, meshInstMatrix);
+                                mainScene.addChild(meshInstNode);
+
+                                chunkIdx++;
+                                chunkTotalIdx++;
+                            }
+                            instanceIdx++;
+
+                            if (dynInstMat)
+                                break;
+                        }
+                        meshIdx++;
+                    }
+                }
+            };
+
+            for (let object of objects) {
+                // let objDynInstMats = objIdxToObjDynInstMatsMap.get(object.header.index) || [];
+                // emitObject(object, objDynInstMats);
+
+                let objDynInstMats = objIdxToObjDynInstMatsMap.get(object.header.index);
+                if (objDynInstMats) {
+                    for (let objDynInstMat of objDynInstMats) {
+                        emitObject(object, objDynInstMat);
+                    }
+                    emitObject(object);
+                } else {
+                    emitObject(object);
+                }
+            }
+
+            const glb = io.writeBinary(doc);
+            downloadBuffer(`${this.id}.glb`, glb);
         }
 
         const renderer = new Sly2Renderer(device);
