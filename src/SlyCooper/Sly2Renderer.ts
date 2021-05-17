@@ -14,6 +14,9 @@ import { TextureMapping } from "../TextureHolder";
 import { MathConstants, scaleMatrix } from "../MathHelpers";
 import { AABB } from "../Geometry";
 import { setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers";
+import { Texture } from "./SlyData";
+import { DynamicObjectInstance, LevelObject, parseObjectEntries, TextureContainer, MeshContainer, MeshChunk, Mesh } from './Sly2Data';
+import * as Settings from './SlyConstants';
 import { drawWorldSpaceAABB, getDebugOverlayCanvas2D, drawWorldSpacePoint } from "../DebugJunk";
 import { Color, Magenta, colorToCSS, Red, Green, Blue, Cyan } from "../Color";
 import { GfxBuffer, GfxInputLayout, GfxInputState, GfxBufferUsage, GfxVertexAttributeDescriptor, GfxFormat, GfxInputLayoutBufferDescriptor, GfxVertexBufferFrequency } from "../gfx/platform/GfxPlatform";
@@ -21,13 +24,656 @@ import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache";
 import { GfxrAttachmentSlot, makeBackbufferDescSimple } from '../gfx/render/GfxRenderGraph';
 
+class SlyRenderHacks {
+    disableTextures = false;
+    disableVertexColors = false;
+    disableAmbientLighting = true;
+    disableMeshInstances = false;
+}
+
+class SlyDebugHacks {
+    drawMeshOrigins = false;
+    drawSzmsPositions = false;
+    drawSzmePositions = false;
+}
+
+let renderHacks = new SlyRenderHacks();
+let debugHacks = new SlyDebugHacks();
+
+class SlyProgram {
+    public static ub_SceneParams = 0;
+    public static ub_ShapeParams = 1;
+
+    public both = `
+layout(row_major, std140) uniform ub_SceneParams {
+    Mat4x4 u_Projection;
+    float u_Time;
+};
+
+layout(row_major, std140) uniform ub_ShapeParams {
+    Mat4x4 u_BoneMatrix[1];
+    vec2 u_TexOffset;
+};
+
+// #define u_BaseDiffuse (u_Misc[0].x)
+// #define u_BaseAmbient (u_Misc[0].y)
+
+#define u_BaseDiffuse 1.0
+#define u_BaseAmbient 0.2
+
+uniform sampler2D u_Texture[2];
+
+#define u_DiffuseTexture SAMPLER_2D(u_Texture[0])
+`;
+
+    public vert: string = `
+layout(location = 0) in vec3 a_Position;
+layout(location = 1) in vec3 a_Normal;
+layout(location = 2) in vec2 a_TexCoord;
+layout(location = 3) in vec4 a_VertexColor;
+
+out vec3 v_Normal;
+out vec2 v_TexCoord;
+out vec3 v_VertexColor;
+
+void main() {
+    gl_Position = Mul(u_Projection, Mul(u_BoneMatrix[0], vec4(a_Position, 1.0)));
+    v_Normal = normalize(vec4(a_Normal, 0.0).xyz);
+
+    // gl_Position = Mul(u_Projection, vec4(a_Position, 1.0));
+    // v_Normal = normalize(vec4(a_Normal, 0.0).xyz);
+    v_TexCoord = a_TexCoord.xy;
+    v_VertexColor = a_VertexColor.rgb;
+}
+`;
+
+    public frag: string = `
+in vec2 v_TexCoord;
+in vec3 v_Normal;
+in vec3 v_VertexColor;
+
+void main() {
+    vec2 t_TexCoord = mod(v_TexCoord + u_TexOffset, vec2(1.0));
+
+    gl_FragColor = texture(u_DiffuseTexture, t_TexCoord.xy);
+    gl_FragColor.a *= 2.0;
+    return;
+
+#if ENABLE_TEXTURES
+    vec3 t_DiffuseMapColor = texture(u_DiffuseTexture, t_TexCoord.xy).rgb;
+#else
+    vec3 t_DiffuseMapColor = vec3(1.0);
+#endif
+
+#if ENABLE_VERTEX_COLORS
+    vec3 vertexColor = v_VertexColor;
+#else
+    vec3 vertexColor = vec3(1.0);
+#endif
+
+    float vertexLighting = 0.22;
+    vec4 inv_lit = vec4(0.105, 0.105, 0.105, 0.501);
+    float tc1_w = 0.5;
+
+    vec3 diffuseFinal = t_DiffuseMapColor * vertexColor * vertexLighting;
+
+#if ENABLE_AMBIENT_LIGHTING
+    vec3 lightDirection = normalize(vec3(0.1027, 0.02917, 0.267));
+    vec3 lightColor = vec3(10./255., 23./255., 26./255.) * 1.0;
+    float ambientLambert = clamp(max(dot(v_Normal.xyz, lightDirection), 0.0), 0.0, 1.0);
+    vec3 ambientColor = lightColor * ambientLambert;
+
+    vec3 ambientFinal = /* t_UnkMapColor.rgb * */ ambientColor;
+    vec3 unkFinal = (inv_lit.rgb * t_AmbientMapColor.rgb + diffuseFinal) / 2.0;
+#else
+    vec3 ambientFinal = vec3(0.0);
+    vec3 unkFinal = diffuseFinal;
+#endif
+
+    // TODO: implement more properly
+    // if (gl_FragColor.a == 0.0)
+        // discard;
+
+    gl_FragColor.rgb = (ambientFinal * tc1_w + unkFinal) * 4.0;
+    gl_FragColor.a = 1.0;
+}
+`;
+
+    public defines: DefineMap = new Map<string, string>();
+
+    constructor(renderHacks: SlyRenderHacks) {
+        let boolToStr = (value: boolean) => {
+            return value ? "0" : "1";
+        };
+
+        this.defines.set("ENABLE_TEXTURES", boolToStr(renderHacks.disableTextures));
+        this.defines.set("ENABLE_VERTEX_COLORS", boolToStr(renderHacks.disableVertexColors));
+        this.defines.set("ENABLE_AMBIENT_LIGHTING", boolToStr(renderHacks.disableAmbientLighting));
+    }
+}
+
+const bindingLayouts: GfxBindingLayoutDescriptor[] = [
+    { numUniformBuffers: 2, numSamplers: 2, },
+];
+
 export class Sly2Renderer implements Viewer.SceneGfx {
-    constructor(device: GfxDevice) {
+    public textureHolder = new FakeTextureHolder([]);
+
+    private program: (GfxProgramDescriptorSimple | null) = null;
+    private renderHelper: GfxRenderHelper;
+    private modelMatrix: mat4 = mat4.create();
+    private meshRenderers: Sly2MeshRenderer[] = [];
+    private meshRenderersReverse: Sly2MeshRenderer[] = [];
+
+    private createShader(device: GfxDevice) {
+        this.program = preprocessProgramObj_GLSL(device, new SlyProgram(renderHacks));
+    }
+
+    constructor(device: GfxDevice, objects: LevelObject[], dynObjectInsts: DynamicObjectInstance[], texIdToTex: Map<string, Texture>) {
+        this.renderHelper = new GfxRenderHelper(device);
+
+        const gfxCache = this.renderHelper.getCache();
+
+        for (let object of objects) {
+            for (let meshContainer of object.meshContainers) {
+                for (let mesh of meshContainer.meshes) {
+
+                    let meshInstanceMatrices = [mat4.create()];
+
+                    for (let meshInstance of mesh.instances)
+                        meshInstanceMatrices.push(mat4.clone(meshInstance));
+
+                    // TODO: This is slow!
+                    let dynObjects: mat4[] = [];
+                    for (let dynObjInst of dynObjectInsts) {
+                        if (object.header.id0 == dynObjInst.objId0) {
+                            dynObjects.push(dynObjInst.matrix);
+                        }
+                    }
+                    for (let dynObjInstance of dynObjects)
+                        meshInstanceMatrices.push(mat4.clone(dynObjInstance));
+
+                    if (mesh.u0 == 0) {
+                        let transformC2 = meshContainer.meshC2Entries[mesh.containerInstanceMatrixIndex].transformMatrix;
+
+                        if (transformC2) {
+                            for (let i = 0; i < meshInstanceMatrices.length; ++i) {
+                                mat4.multiply(meshInstanceMatrices[i], meshInstanceMatrices[i], transformC2!);
+                            }
+                        }
+                    }
+
+                    let chunkIdx = 0;
+                    for (let meshChunk of mesh.chunks) {
+                        // TODO(opt): don't make 2 separate Sly2MeshRenderers for this
+
+                        for (let triIdx = 0; triIdx < 2; triIdx++) {
+                            let triangleIndices = (triIdx == 0) ? meshChunk.trianglesIndices1 : meshChunk.trianglesIndices2;
+
+                            const geometryData = new GeometryData(device, gfxCache, meshChunk, triangleIndices);
+
+                            let isFullyOpaque = true;
+
+                            let textureData: (TextureData | null)[] = nArray(2, () => null);
+                            if (mesh.szme) {
+                                let texId = (triIdx == 0) ? mesh.szme!.chunks[chunkIdx].textureId0 : mesh.szme!.chunks[chunkIdx].textureId1;
+                                if (texId) {
+                                    const textureDiffuse = texIdToTex.get(`${object.header.index}_${texId!}`);
+                                    if (textureDiffuse) {
+                                        textureData[0] = new TextureData(device, gfxCache, textureDiffuse)
+                                        isFullyOpaque = textureDiffuse.isFullyOpaque;
+                                    }
+                                }
+                            }
+
+                            const meshRenderer = new Sly2MeshRenderer(textureData, geometryData, meshChunk, isFullyOpaque, meshInstanceMatrices);
+
+                            this.meshRenderers.push(meshRenderer);
+                        }
+                        chunkIdx++;
+                    }
+                }
+            }
+            // this.meshRenderersReverse = this.meshRenderers.slice().reverse();
+        }
+    }
+
+    public prepareToRender(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput, renderInstManager: GfxRenderInstManager) {
+        const template = this.renderHelper.pushTemplateRenderInst();
+        template.setBindingLayouts(bindingLayouts);
+
+        if (!this.program)
+            this.createShader(device);
+        const gfxProgram = renderInstManager.gfxRenderCache.createProgramSimple(device, this.program!);
+        template.setGfxProgram(gfxProgram);
+
+        let offs = template.allocateUniformBuffer(SlyProgram.ub_SceneParams, 16 + 1);
+        const d = template.mapUniformBufferF32(SlyProgram.ub_SceneParams);
+        offs += fillMatrix4x4(d, offs, viewerInput.camera.projectionMatrix);
+        d[offs++] = viewerInput.time / 10000.0;
+
+        for (let meshRenderer of this.meshRenderers) {
+            meshRenderer.prepareToRender(renderInstManager, viewerInput);
+        }
+        // for (let meshRenderer of this.meshRenderersReverse) {
+        //     meshRenderer.prepareToRender(renderInstManager, viewerInput);
+        // }
+
+        renderInstManager.popTemplateRenderInst();
+
+        this.renderHelper.prepareToRender(device);
     }
 
     public render(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput) {
+        const renderInstManager = this.renderHelper.renderInstManager;
+        const builder = this.renderHelper.renderGraph.newGraphBuilder();
+
+        const mainColorDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.Color0, viewerInput, opaqueBlackFullClearRenderPassDescriptor);
+        const mainDepthDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.DepthStencil, viewerInput, opaqueBlackFullClearRenderPassDescriptor);
+
+        const mainColorTargetID = builder.createRenderTargetID(mainColorDesc, 'Main Color');
+        const mainDepthTargetID = builder.createRenderTargetID(mainDepthDesc, 'Main Depth');
+        builder.pushPass((pass) => {
+            pass.setDebugName('Main');
+            pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
+            pass.attachRenderTargetID(GfxrAttachmentSlot.DepthStencil, mainDepthTargetID);
+            pass.exec((passRenderer) => {
+                renderInstManager.drawOnPassRenderer(device, passRenderer);
+            });
+        });
+        pushAntialiasingPostProcessPass(builder, this.renderHelper, viewerInput, mainColorTargetID);
+        builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
+
+        this.prepareToRender(device, viewerInput, renderInstManager);
+        this.renderHelper.renderGraph.execute(device, builder);
+        renderInstManager.resetRenderInsts();
+
+        if (debugHacks.drawMeshOrigins || debugHacks.drawSzmsPositions || debugHacks.drawSzmePositions) {
+            const ctx = getDebugOverlayCanvas2D();
+
+            for (let meshRenderer of this.meshRenderers) {
+                if (debugHacks.drawSzmsPositions) {
+                    let posVec = meshRenderer.meshChunk.positions;
+                    for (let i = 0; i < posVec.length; i += 3) {
+                        const p = vec3.fromValues(posVec[i + 0], posVec[i + 2], -posVec[i + 1]);
+                        drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Magenta, 5);
+                    }
+                }
+
+                // if (meshRenderer.meshChunk.szme) {
+                //     if (debugHacks.drawMeshOrigins) {
+                //         let origin = meshRenderer.meshChunk.szme?.origin;
+                //         let originVec = vec3.fromValues(origin[0], origin[2], -origin[1]);
+                //         drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, originVec, Green, 9);
+                //     }
+
+                //     if (debugHacks.drawSzmePositions) {
+                //         let posVec = meshRenderer.meshChunk.szme.positions;
+                //         for (let i = 0; i < posVec.length; i += 3) {
+                //             const p = vec3.fromValues(posVec[i + 0], posVec[i + 2], -posVec[i + 1]);
+                //             drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Cyan, 7);
+
+                //         }
+                //     }
+                // }
+            }
+        }
+
+        // let aabb = new AABB(-1000, -5000, -1000, 100, 5000, 100);
+        // const ctx = getDebugOverlayCanvas2D();
+        // drawWorldSpaceAABB(ctx, viewerInput.camera.clipFromWorldMatrix, aabb);
+
+        // const dbgPos = this.meshRenderers[148].meshChunk.szme?.positions!;
+        // for (let i = 0; i < dbgPos.length; i += 3) {
+        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Magenta, 50);
+        //     // console.log(`${p}`);
+        // }
+        // dbgPos = this.meshRenderers[148].meshChunk.positions!;
+        // for (let i = 0; i < dbgPos.length; i += 3) {
+        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Cyan, 20);
+        //     // console.log(`${p}`);
+        // }
+
+        // for (let meshRenderer of this.meshRenderers) {
+        // let dbgPos = meshRenderer.meshChunk.positions;
+        // for (let i = 0; i < dbgPos.length; i += 3) {
+        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Magenta, 13);
+        // }
+
+        // if (meshRenderer.meshChunk.szme) {
+        // let orig = meshRenderer.meshChunk.szme?.origin;
+        // let dbgPos = vec3.fromValues(orig[0], orig[2], -orig[1]);
+        // drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, dbgPos, Green, 7);
+
+        // dbgPos = meshRenderer.meshChunk.szme.positions;
+        // for (let i = 0; i < dbgPos.length; i += 3) {
+        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Cyan, 4);
+
+        // }
+        // }
+        // }
+    }
+
+    private setTexturesEnabled(enabled: boolean) {
+        renderHacks.disableTextures = !enabled;
+        this.program = null;
+    }
+
+    private setVertexColorsEnabled(enabled: boolean) {
+        renderHacks.disableVertexColors = !enabled;
+        this.program = null;
+    }
+
+    private setAmbientLightingEnabled(enabled: boolean) {
+        renderHacks.disableAmbientLighting = !enabled;
+        this.program = null;
+    }
+
+    private setMeshInstancesEnabled(enabled: boolean) {
+        renderHacks.disableMeshInstances = !enabled;
+        this.program = null;
+    }
+
+    public createPanels(): UI.Panel[] {
+        const panels: UI.Panel[] = [];
+
+        const renderHacksPanel = new UI.Panel();
+        renderHacksPanel.customHeaderBackgroundColor = UI.COOL_BLUE_COLOR;
+        renderHacksPanel.setTitle(UI.RENDER_HACKS_ICON, 'Render Hacks');
+
+        const enableVertexColorsCheckbox = new UI.Checkbox('Enable Vertex Colors', !renderHacks.disableVertexColors);
+        enableVertexColorsCheckbox.onchanged = () => {
+            this.setVertexColorsEnabled(enableVertexColorsCheckbox.checked);
+        };
+        renderHacksPanel.contents.appendChild(enableVertexColorsCheckbox.elem);
+
+        const enableTextures = new UI.Checkbox('Enable Textures', !renderHacks.disableTextures);
+        enableTextures.onchanged = () => {
+            this.setTexturesEnabled(enableTextures.checked);
+        };
+        renderHacksPanel.contents.appendChild(enableTextures.elem);
+
+        const enableAmbientLighting = new UI.Checkbox('Enable Ambient Lighting', !renderHacks.disableAmbientLighting);
+        enableAmbientLighting.onchanged = () => {
+            this.setAmbientLightingEnabled(enableAmbientLighting.checked);
+        };
+        renderHacksPanel.contents.appendChild(enableAmbientLighting.elem);
+
+        const enableMeshInstances = new UI.Checkbox('Enable Mesh Instances', !renderHacks.disableMeshInstances);
+        enableMeshInstances.onchanged = () => {
+            this.setMeshInstancesEnabled(enableMeshInstances.checked);
+        };
+        renderHacksPanel.contents.appendChild(enableMeshInstances.elem);
+
+        panels.push(renderHacksPanel);
+
+        const debugPanel = new UI.Panel();
+        debugPanel.customHeaderBackgroundColor = UI.COOL_BLUE_COLOR;
+        debugPanel.setTitle(UI.RENDER_HACKS_ICON, 'Debugging Hacks');
+        const drawMeshOriginsCheckbox = new UI.Checkbox('Draw Mesh Origins', false);
+        drawMeshOriginsCheckbox.onchanged = () => {
+            debugHacks.drawMeshOrigins = drawMeshOriginsCheckbox.checked;
+        };
+        debugPanel.contents.appendChild(drawMeshOriginsCheckbox.elem);
+        const drawSzmsPositionsCheckbox = new UI.Checkbox('Draw SZMS Positions', false);
+        drawSzmsPositionsCheckbox.onchanged = () => {
+            debugHacks.drawSzmsPositions = drawSzmsPositionsCheckbox.checked;
+        };
+        debugPanel.contents.appendChild(drawSzmsPositionsCheckbox.elem);
+        const drawSzmePositionsCheckbox = new UI.Checkbox('Draw SZME Positions', false);
+        drawSzmePositionsCheckbox.onchanged = () => {
+            debugHacks.drawSzmePositions = drawSzmePositionsCheckbox.checked;
+        };
+        debugPanel.contents.appendChild(drawSzmePositionsCheckbox.elem);
+        panels.push(debugPanel);
+
+        // const layersPanel = new UI.LayerPanel();
+        // layersPanel.setLayers(this.meshRenderers);
+        // panels.push(layersPanel);
+
+        return panels;
     }
 
     public destroy(device: GfxDevice): void {
+        this.renderHelper.destroy(device);
+    }
+}
+
+export interface VertexAttributes {
+    position: vec3;
+    normal: vec3;
+    texcoord: vec2;
+}
+
+export interface IndexedPrimitives<T> {
+    vertices: T[];
+    indices: number[];
+}
+
+export class GeometryData {
+    private indexBuffer: GfxBuffer;
+    private positionBuffer: GfxBuffer;
+    private normalBuffer: GfxBuffer;
+    private texcoordBuffer: GfxBuffer;
+    private vertexColorBuffer: GfxBuffer;
+    public indexCount: number;
+    public inputLayout: GfxInputLayout;
+    public inputState: GfxInputState;
+
+    constructor(device: GfxDevice, cache: GfxRenderCache, meshChunk: MeshChunk, triangleIndices: Uint16Array) {
+        // TODO: trianglesIndices2
+
+        const indices = Uint16Array.from(triangleIndices);
+        this.indexCount = indices.length;
+        this.positionBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, meshChunk.positions.buffer);
+        this.normalBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, meshChunk.normals.buffer);
+        this.texcoordBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, meshChunk.texCoords.buffer);
+        // let lighting: Float32Array;
+        // if (meshChunk.szme)
+        //     lighting = meshChunk.szme.lightingFloats;
+        // else
+        //     lighting = new Float32Array(meshChunk.positions.length * 4);
+        // let lighting = new Float32Array(meshChunk.positions.length * 4);
+        let vertexColor = meshChunk.vertexColorFloats;
+        this.vertexColorBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, vertexColor.buffer);
+        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.INDEX, triangleIndices.buffer);
+
+        const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
+            { location: 0, bufferIndex: 0, format: GfxFormat.F32_RGB, bufferByteOffset: 0, }, // Position
+            { location: 1, bufferIndex: 1, format: GfxFormat.F32_RGB, bufferByteOffset: 0, }, // Normal
+            { location: 2, bufferIndex: 2, format: GfxFormat.F32_RG, bufferByteOffset: 0, }, // TexCoord
+            { location: 3, bufferIndex: 3, format: GfxFormat.F32_RGBA, bufferByteOffset: 0, }, // VertexColor
+        ];
+        const vertexBufferDescriptors: GfxInputLayoutBufferDescriptor[] = [
+            { byteStride: 3 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
+            { byteStride: 3 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
+            { byteStride: 2 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
+            { byteStride: 4 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
+        ];
+        this.inputLayout = cache.createInputLayout(device, {
+            indexBufferFormat: GfxFormat.U16_R,
+            vertexAttributeDescriptors,
+            vertexBufferDescriptors,
+        });
+        this.inputState = device.createInputState(this.inputLayout, [
+            { buffer: this.positionBuffer, byteOffset: 0, },
+            { buffer: this.normalBuffer, byteOffset: 0, },
+            { buffer: this.texcoordBuffer, byteOffset: 0, },
+            { buffer: this.vertexColorBuffer, byteOffset: 0, },
+        ],
+            { buffer: this.indexBuffer, byteOffset: 0 });
+    }
+
+    public destroy(device: GfxDevice): void {
+        device.destroyBuffer(this.indexBuffer);
+        device.destroyBuffer(this.positionBuffer);
+        device.destroyBuffer(this.normalBuffer);
+        device.destroyBuffer(this.texcoordBuffer);
+        device.destroyInputState(this.inputState);
+    }
+}
+
+class TextureData {
+    public texture: GfxTexture;
+    public sampler: GfxSampler;
+
+    private makeGfxTexture(device: GfxDevice, texture: Texture): GfxTexture {
+        // console.log(`makeGfxTexture: size ${texture.width}x${texture.height}`);
+        const gfxTexture = device.createTexture(makeTextureDescriptor2D(GfxFormat.U8_RGBA_NORM, texture.width, texture.height, 1));
+        // console.log(gfxTexture);
+        device.uploadTextureData(gfxTexture, 0, [texture.texelsRgba]);
+        return gfxTexture;
+    }
+
+    private makeGfxSampler(device: GfxDevice, gfxCache: GfxRenderCache): GfxSampler {
+        return gfxCache.createSampler(device, {
+            // wrapS: GfxWrapMode.CLAMP,
+            // wrapT: GfxWrapMode.CLAMP,
+            wrapS: GfxWrapMode.REPEAT,
+            wrapT: GfxWrapMode.REPEAT,
+            // minFilter: GfxTexFilterMode.POINT,
+            // magFilter: GfxTexFilterMode.POINT,
+            minFilter: GfxTexFilterMode.BILINEAR,
+            magFilter: GfxTexFilterMode.BILINEAR,
+            mipFilter: GfxMipFilterMode.NO_MIP,
+            minLOD: 0, maxLOD: 0,
+        });
+    }
+
+    constructor(device: GfxDevice, gfxCache: GfxRenderCache, texture: Texture) {
+        this.texture = this.makeGfxTexture(device, texture);
+        this.sampler = this.makeGfxSampler(device, gfxCache);
+    }
+}
+
+const textureMappingScratch = nArray(2, () => new TextureMapping());
+
+const viewMatScratch = mat4.create();
+const modelViewMatScratch = mat4.create();
+
+export class Sly2MeshRenderer {
+    public textureMatrix = mat4.create();
+
+    private textureMappingDiffuse0: (TextureMapping | null);
+    // private textureMappingDiffuse1: (TextureMapping | null);
+
+    private megaStateFlags: Partial<GfxMegaStateDescriptor> = {};
+    private isSkybox: boolean = false;
+
+    public name: string
+    public visible: boolean = true;
+    public setVisible(v: boolean): void {
+        this.visible = v;
+    }
+
+    private rotX: mat4 = mat4.create();
+
+    private instanceMatrices: mat4[] = [];
+
+    constructor(
+        textureData: (TextureData | null)[],
+        public geometryData: GeometryData,
+        public meshChunk: MeshChunk,
+        private isFullyOpaque: boolean,
+        meshInstanceMatrices: mat4[]) {
+
+        this.name = meshChunk.name;
+
+        if (textureData[0]) {
+            this.textureMappingDiffuse0 = new TextureMapping();
+            this.textureMappingDiffuse0.gfxTexture = textureData[0].texture;
+            this.textureMappingDiffuse0.gfxSampler = textureData[0].sampler;
+        }
+        // if (textureData[1]) {
+        //     this.textureMappingDiffuse1 = new TextureMapping();
+        //     this.textureMappingDiffuse1.gfxTexture = textureData[1].texture;
+        //     this.textureMappingDiffuse1.gfxSampler = textureData[1].sampler;
+        // }
+
+        this.megaStateFlags.frontFace = GfxFrontFaceMode.CW;
+        // this.megaStateFlags.cullMode = GfxCullMode.BACK;
+        this.megaStateFlags.cullMode = GfxCullMode.NONE;
+
+        setAttachmentStateSimple(this.megaStateFlags, {
+            blendMode: GfxBlendMode.ADD,
+            blendSrcFactor: GfxBlendFactor.SRC_ALPHA,
+            blendDstFactor: GfxBlendFactor.ONE_MINUS_SRC_ALPHA,
+        });
+
+        this.rotX = mat4.fromXRotation(this.rotX, 3 * 90 * MathConstants.DEG_TO_RAD);
+
+        this.isSkybox = false; // ((meshChunk.flags & Data.MeshFlag.Skybox) != 0);
+
+        for (let meshInstanceMatrix of meshInstanceMatrices)
+            this.instanceMatrices.push(meshInstanceMatrix)
+    }
+
+    public prepareToRender(renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput) {
+        if (!this.visible)
+            return;
+
+        const template = renderInstManager.pushTemplateRenderInst();
+
+        template.setInputLayoutAndState(this.geometryData.inputLayout, this.geometryData.inputState);
+        if (this.textureMappingDiffuse0) {
+            // todo: is scratch/copy necessary? ask jasper
+            textureMappingScratch[0].copy(this.textureMappingDiffuse0);
+            template.setSamplerBindingsFromTextureMappings(textureMappingScratch);
+        }
+        template.setMegaStateFlags(this.megaStateFlags);
+
+        let rendererLayer: GfxRendererLayer;
+        if (this.isSkybox)
+            rendererLayer = GfxRendererLayer.BACKGROUND;
+        else if (this.isFullyOpaque)
+            rendererLayer = GfxRendererLayer.OPAQUE;
+        else
+            rendererLayer = GfxRendererLayer.TRANSLUCENT;
+
+        template.sortKey = makeSortKey(rendererLayer);
+
+        if (this.isSkybox)
+            computeViewMatrixSkybox(viewMatScratch, viewerInput.camera);
+        else
+            computeViewMatrix(viewMatScratch, viewerInput.camera);
+
+
+        let texOffset = vec2.create();
+
+        // if (!this.isSkybox)
+        //     texOffset[1] = viewerInput.time / 10000.0;
+
+        // TODO: instanced rendering
+
+        for (let instanceMatrix of this.instanceMatrices) {
+            const renderInstInstance = renderInstManager.newRenderInst();
+
+            let offs = renderInstInstance.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 4 + 2);
+            const d = renderInstInstance.mapUniformBufferF32(SlyProgram.ub_ShapeParams);
+
+            mat4.copy(modelViewMatScratch, viewMatScratch);
+
+            mat4.mul(modelViewMatScratch, modelViewMatScratch, this.rotX);
+            mat4.mul(modelViewMatScratch, modelViewMatScratch, instanceMatrix);
+
+            if (this.isSkybox)
+                mat4.scale(modelViewMatScratch, modelViewMatScratch, [10, 10, 10]);
+
+            offs += fillMatrix4x4(d, offs, modelViewMatScratch);
+            offs += fillVec2v(d, offs, texOffset);
+
+            renderInstInstance.drawIndexes(this.geometryData.indexCount);
+            renderInstInstance.drawIndexes(this.geometryData.indexCount);
+            renderInstManager.submitRenderInst(renderInstInstance);
+
+            if (renderHacks.disableMeshInstances)
+                break;
+        }
+
+        renderInstManager.popTemplateRenderInst();
     }
 }
