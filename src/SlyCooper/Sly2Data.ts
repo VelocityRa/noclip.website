@@ -501,7 +501,7 @@ export class MeshContainer {
 }
 
 export class TextureClut {
-    public h1: number; // if != 1, data is 'inline'. rare
+    public inlineRelated: number; // if != 1, data is 'inline'. rare
 
     public data: ArrayBufferSlice;
     public dataOffset: number;
@@ -511,7 +511,7 @@ export class TextureClut {
 
     constructor(s: DataStream) {
         s.skip(4);
-        this.h1 = s.u8(); // if != 1, data is 'inline'. rare
+        this.inlineRelated = s.u8(); // if != 1, data is 'inline'. rare
         const h2Count = s.u8();
         s.skip(1 + 1);
         this.entryCount = s.u16();
@@ -519,13 +519,17 @@ export class TextureClut {
         s.skip(1);
         this.dataOffset = s.u32();
         s.skip(h2Count * 2);
-        if (this.h1 != 1 && this.entryCount > 0)
+        if (this.isInline() && this.entryCount > 0)
             this.data = s.buf(this.entryCount * this.formatSize);
+    }
+
+    public isInline(): boolean {
+        return this.inlineRelated != 1;
     }
 }
 
 export class TextureImage {
-    public h1: number; // if != 1, data is 'inline'. rare
+    public inlineRelated: number; // if != 1, data is 'inline'. rare
 
     public data: ArrayBufferSlice;
     public dataOffset: number;
@@ -537,7 +541,7 @@ export class TextureImage {
 
     constructor(s: DataStream) {
         s.skip(4);
-        this.h1 = s.u8();
+        this.inlineRelated = s.u8();
         const h2Count = s.u8();
         s.skip(1 + 1);
         this.width = s.u16();
@@ -546,8 +550,12 @@ export class TextureImage {
         this.dataSize = s.u32();
         this.dataOffset = s.u32();
         s.skip(h2Count * 2);
-        if (this.h1 != 1 && this.dataSize > 0)
+        if (this.isInline() && this.dataSize > 0)
             this.data = s.buf(this.dataSize);
+    }
+
+    public isInline(): boolean {
+        return this.inlineRelated != 1;
     }
 }
 
@@ -605,11 +613,11 @@ export class TextureContainer {
         const data = s.buf(dataSize);
 
         for (let clut of this.cluts)
-            if (clut.h1 == 1)
+            if (!clut.isInline())
                 clut.data = data.slice(clut.dataOffset, clut.dataOffset + clut.entryCount * clut.formatSize);
 
         for (let image of this.images)
-            if (image.h1 == 1)
+            if (!image.isInline())
                 image.data = data.slice(image.dataOffset, image.dataOffset + image.dataSize);
     }
 }

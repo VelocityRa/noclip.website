@@ -273,7 +273,9 @@ class Sly2LevelSceneDesc implements SceneDesc {
                         const paletteBuf = clutMeta.data;
                         const imageBuf = imageMeta.data;
 
-                        const texture = new Texture(texEntryIdx, paletteBuf, imageBuf, width, height, clutMeta.entryCount, clutMeta.formatSize, name);
+                        const isImageInline = imageMeta.isInline();
+
+                        const texture = new Texture(texEntryIdx, paletteBuf, imageBuf, width, height, clutMeta.entryCount, clutMeta.formatSize, name, isImageInline);
                         switch (type) {
                             case TextureType.Diffuse:
                                 object.texturesDiffuse.push(texture);
