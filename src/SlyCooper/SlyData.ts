@@ -117,7 +117,7 @@ export class Texture {
     private canvasTex: (Viewer.Texture | null) = null;
 
     constructor(public texEntryIdx: number, paletteBuf: ArrayBufferSlice, imageBuf: ArrayBufferSlice,
-        public width: number, public height: number, colorCount: number, colorSize: number, public name: string = "N/A") {
+        public width: number, public height: number, colorCount: number, colorSize: number, public name: string = "N/A", public isImageInline = false) {
 
         this.texelsRgba = new Uint8Array(width * height * 4);
 

@@ -52,7 +52,7 @@ layout(row_major, std140) uniform ub_SceneParams {
 
 layout(row_major, std140) uniform ub_ShapeParams {
     Mat4x4 u_BoneMatrix[1];
-    vec2 u_TexOffset;
+    // vec2 u_TexOffset;
 };
 
 // #define u_BaseDiffuse (u_Misc[0].x)
@@ -61,7 +61,7 @@ layout(row_major, std140) uniform ub_ShapeParams {
 #define u_BaseDiffuse 1.0
 #define u_BaseAmbient 0.2
 
-uniform sampler2D u_Texture[2];
+// uniform sampler2D u_Texture[2];
 
 #define u_DiffuseTexture SAMPLER_2D(u_Texture[0])
 `;
@@ -93,16 +93,20 @@ in vec3 v_Normal;
 in vec3 v_VertexColor;
 
 void main() {
-    vec2 t_TexCoord = mod(v_TexCoord + u_TexOffset, vec2(1.0));
-
-    gl_FragColor = texture(u_DiffuseTexture, t_TexCoord.xy);
-    gl_FragColor.a *= 2.0;
+    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
     return;
 
+#if 0
+    vec2 t_TexCoord = mod(v_TexCoord /* + u_TexOffset */, vec2(1.0));
+
 #if ENABLE_TEXTURES
-    vec3 t_DiffuseMapColor = texture(u_DiffuseTexture, t_TexCoord.xy).rgb;
+    vec4 t_DiffuseMapColor = texture(u_DiffuseTexture, t_TexCoord.xy);
+    gl_FragColor.a = clamp(t_DiffuseMapColor.a * 2.0, 0.0, 1.0);
+    gl_FragColor.rgb = t_DiffuseMapColor.rgb;
+    return;
 #else
-    vec3 t_DiffuseMapColor = vec3(1.0);
+    vec4 t_DiffuseMapColor = vec4(1.0);
+    gl_FragColor.a = 1.0;
 #endif
 
 #if ENABLE_VERTEX_COLORS
@@ -112,19 +116,18 @@ void main() {
 #endif
 
     float vertexLighting = 0.22;
-    vec4 inv_lit = vec4(0.105, 0.105, 0.105, 0.501);
     float tc1_w = 0.5;
 
-    vec3 diffuseFinal = t_DiffuseMapColor * vertexColor * vertexLighting;
+    vec3 diffuseFinal = t_DiffuseMapColor.rgb * vertexColor * vertexLighting;
 
 #if ENABLE_AMBIENT_LIGHTING
     vec3 lightDirection = normalize(vec3(0.1027, 0.02917, 0.267));
-    vec3 lightColor = vec3(10./255., 23./255., 26./255.) * 1.0;
+    vec3 lightColor = vec3(10./255., 23./255., 26./255.) * 0.5;
     float ambientLambert = clamp(max(dot(v_Normal.xyz, lightDirection), 0.0), 0.0, 1.0);
     vec3 ambientColor = lightColor * ambientLambert;
 
-    vec3 ambientFinal = /* t_UnkMapColor.rgb * */ ambientColor;
-    vec3 unkFinal = (inv_lit.rgb * t_AmbientMapColor.rgb + diffuseFinal) / 2.0;
+    vec3 ambientFinal = ambientColor;
+    vec3 unkFinal = diffuseFinal / 2.0;
 #else
     vec3 ambientFinal = vec3(0.0);
     vec3 unkFinal = diffuseFinal;
@@ -135,7 +138,8 @@ void main() {
         // discard;
 
     gl_FragColor.rgb = (ambientFinal * tc1_w + unkFinal) * 4.0;
-    gl_FragColor.a = 1.0;
+
+#endif
 }
 `;
 
@@ -153,7 +157,7 @@ void main() {
 }
 
 const bindingLayouts: GfxBindingLayoutDescriptor[] = [
-    { numUniformBuffers: 2, numSamplers: 2, },
+    { numUniformBuffers: 2, numSamplers: 0, },
 ];
 
 export class Sly2Renderer implements Viewer.SceneGfx {
@@ -175,6 +179,9 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         const gfxCache = this.renderHelper.getCache();
 
         for (let object of objects) {
+            // if (object.header.index == 286)
+                // continue;
+
             for (let meshContainer of object.meshContainers) {
                 for (let mesh of meshContainer.meshes) {
 
@@ -287,6 +294,9 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         this.prepareToRender(device, viewerInput, renderInstManager);
         this.renderHelper.renderGraph.execute(device, builder);
         renderInstManager.resetRenderInsts();
+
+        // const ctx = getDebugOverlayCanvas2D();
+        // drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, [0,0,0], Magenta, 5);
 
         if (debugHacks.drawMeshOrigins || debugHacks.drawSzmsPositions || debugHacks.drawSzmePositions) {
             const ctx = getDebugOverlayCanvas2D();
@@ -465,8 +475,6 @@ export class GeometryData {
     public inputState: GfxInputState;
 
     constructor(device: GfxDevice, cache: GfxRenderCache, meshChunk: MeshChunk, triangleIndices: Uint16Array) {
-        // TODO: trianglesIndices2
-
         const indices = Uint16Array.from(triangleIndices);
         this.indexCount = indices.length;
         this.positionBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, meshChunk.positions.buffer);
@@ -521,6 +529,8 @@ class TextureData {
     public texture: GfxTexture;
     public sampler: GfxSampler;
 
+    public isImageInline: boolean;
+
     private makeGfxTexture(device: GfxDevice, texture: Texture): GfxTexture {
         // console.log(`makeGfxTexture: size ${texture.width}x${texture.height}`);
         const gfxTexture = device.createTexture(makeTextureDescriptor2D(GfxFormat.U8_RGBA_NORM, texture.width, texture.height, 1));
@@ -547,6 +557,7 @@ class TextureData {
     constructor(device: GfxDevice, gfxCache: GfxRenderCache, texture: Texture) {
         this.texture = this.makeGfxTexture(device, texture);
         this.sampler = this.makeGfxSampler(device, gfxCache);
+        this.isImageInline = texture.isImageInline;
     }
 }
 
@@ -587,6 +598,7 @@ export class Sly2MeshRenderer {
             this.textureMappingDiffuse0 = new TextureMapping();
             this.textureMappingDiffuse0.gfxTexture = textureData[0].texture;
             this.textureMappingDiffuse0.gfxSampler = textureData[0].sampler;
+            this.isSkybox = textureData[0].isImageInline;
         }
         // if (textureData[1]) {
         //     this.textureMappingDiffuse1 = new TextureMapping();
@@ -606,8 +618,6 @@ export class Sly2MeshRenderer {
 
         this.rotX = mat4.fromXRotation(this.rotX, 3 * 90 * MathConstants.DEG_TO_RAD);
 
-        this.isSkybox = false; // ((meshChunk.flags & Data.MeshFlag.Skybox) != 0);
-
         for (let meshInstanceMatrix of meshInstanceMatrices)
             this.instanceMatrices.push(meshInstanceMatrix)
     }
@@ -621,8 +631,8 @@ export class Sly2MeshRenderer {
         template.setInputLayoutAndState(this.geometryData.inputLayout, this.geometryData.inputState);
         if (this.textureMappingDiffuse0) {
             // todo: is scratch/copy necessary? ask jasper
-            textureMappingScratch[0].copy(this.textureMappingDiffuse0);
-            template.setSamplerBindingsFromTextureMappings(textureMappingScratch);
+            // textureMappingScratch[0].copy(this.textureMappingDiffuse0);
+            // template.setSamplerBindingsFromTextureMappings(textureMappingScratch);
         }
         template.setMegaStateFlags(this.megaStateFlags);
 
@@ -641,8 +651,7 @@ export class Sly2MeshRenderer {
         else
             computeViewMatrix(viewMatScratch, viewerInput.camera);
 
-
-        let texOffset = vec2.create();
+        // let texOffset = vec2.create();
 
         // if (!this.isSkybox)
         //     texOffset[1] = viewerInput.time / 10000.0;
@@ -652,7 +661,7 @@ export class Sly2MeshRenderer {
         for (let instanceMatrix of this.instanceMatrices) {
             const renderInstInstance = renderInstManager.newRenderInst();
 
-            let offs = renderInstInstance.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 4 + 2);
+            let offs = renderInstInstance.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 4 /* + 2*/);
             const d = renderInstInstance.mapUniformBufferF32(SlyProgram.ub_ShapeParams);
 
             mat4.copy(modelViewMatScratch, viewMatScratch);
@@ -661,12 +670,11 @@ export class Sly2MeshRenderer {
             mat4.mul(modelViewMatScratch, modelViewMatScratch, instanceMatrix);
 
             if (this.isSkybox)
-                mat4.scale(modelViewMatScratch, modelViewMatScratch, [10, 10, 10]);
+                mat4.scale(modelViewMatScratch, modelViewMatScratch, [2, 2, 2]);
 
             offs += fillMatrix4x4(d, offs, modelViewMatScratch);
-            offs += fillVec2v(d, offs, texOffset);
+            // offs += fillVec2v(d, offs, texOffset);
 
-            renderInstInstance.drawIndexes(this.geometryData.indexCount);
             renderInstInstance.drawIndexes(this.geometryData.indexCount);
             renderInstManager.submitRenderInst(renderInstInstance);
 
