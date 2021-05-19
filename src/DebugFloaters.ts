@@ -136,6 +136,9 @@ export class FloatingPanel implements Widget {
         this.toplevel.style.top = (parseFloat(this.toplevel.style.top!) + dy) + 'px';
     }
 
+    public onGrab(e: MouseEvent): void {
+    }
+
     public onGrabReleased(): void {
     }
 
