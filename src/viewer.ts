@@ -123,6 +123,10 @@ export class Viewer {
         });
     }
 
+    private onMouseClick(): void {
+
+    }
+
     private onKeyMoveSpeed(): void {
         for (let i = 0; i < this.keyMoveSpeedListeners.length; i++)
             this.keyMoveSpeedListeners[i](this);

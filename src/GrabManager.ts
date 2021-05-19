@@ -1,5 +1,6 @@
 
 export interface GrabListener {
+    onGrab(e: MouseEvent): void;
     onMotion(dx: number, dy: number): void;
     onGrabReleased(): void;
 }
@@ -140,6 +141,8 @@ export class GrabManager {
             document.addEventListener('mouseup', this._onMouseUp);
         else
             document.addEventListener('mousedown', this._onMouseDown, { capture: true });
+
+        this.grabListener.onGrab(e);
     }
 
     public releaseGrab(): void {

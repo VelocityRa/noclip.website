@@ -87,7 +87,6 @@ export default class InputManager {
         });
         this.toplevel.addEventListener('wheel', this._onWheel, { passive: false });
         this.toplevel.addEventListener('mousedown', (e) => {
-            console.log(e);
             if (!this.isInteractive) {
                 if (this.nonInteractiveListener)
                     GlobalGrabManager.takeGrab(this.nonInteractiveListener, e, { takePointerLock: false, useGrabbingCursor: true, releaseOnMouseUp: true });
@@ -306,6 +305,9 @@ export default class InputManager {
         } else {
             this.touchGesture = TouchGesture.None;
         }
+    }
+
+    public onGrab(e: MouseEvent): void {
     }
 
     public onMotion(dx: number, dy: number) {
