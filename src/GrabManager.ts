@@ -1,5 +1,5 @@
 
-interface GrabListener {
+export interface GrabListener {
     onMotion(dx: number, dy: number): void;
     onGrabReleased(): void;
 }

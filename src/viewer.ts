@@ -15,6 +15,7 @@ import { MathConstants } from './MathHelpers';
 import { IS_DEVELOPMENT } from './BuildVersion';
 import { GlobalSaveManager } from './SaveManager';
 import { mat4 } from 'gl-matrix';
+import { GrabListener } from './GrabManager';
 
 export interface ViewerUpdateInfo {
     time: number;
@@ -56,6 +57,8 @@ export interface SceneGfx {
     createCameraController?(): CameraController;
     adjustCameraController?(c: CameraController): void;
     getDefaultWorldMatrix?(dst: mat4): void;
+    isInteractive?: boolean;
+    nonInteractiveListener?: GrabListener;
     serializeSaveState?(dst: ArrayBuffer, offs: number): number;
     deserializeSaveState?(src: ArrayBuffer, offs: number, byteLength: number): number;
     onstatechanged?: () => void;
