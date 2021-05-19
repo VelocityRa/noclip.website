@@ -23,6 +23,7 @@ import { GfxBuffer, GfxInputLayout, GfxInputState, GfxBufferUsage, GfxVertexAttr
 import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache";
 import { GfxrAttachmentSlot, makeBackbufferDescSimple } from '../gfx/render/GfxRenderGraph';
+import { GrabListener } from '../GrabManager';
 
 class SlyRenderHacks {
     disableTextures = false;
@@ -168,6 +169,8 @@ export class Sly2Renderer implements Viewer.SceneGfx {
     private modelMatrix: mat4 = mat4.create();
     private meshRenderers: Sly2MeshRenderer[] = [];
     private meshRenderersReverse: Sly2MeshRenderer[] = [];
+
+    public nonInteractiveListener: GrabListener = this;
 
     private createShader(device: GfxDevice) {
         this.program = preprocessProgramObj_GLSL(device, new SlyProgram(renderHacks));
@@ -450,6 +453,16 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
     public destroy(device: GfxDevice): void {
         this.renderHelper.destroy(device);
+    }
+
+    //
+    // GrabListener
+    //
+    public onMotion(dx: number, dy: number): void {
+        console.log(dx, dy);
+    }
+    public onGrabReleased(): void {
+        console.log('grab released');
     }
 }
 

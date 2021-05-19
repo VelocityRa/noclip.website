@@ -1,6 +1,6 @@
 
 import { SaveManager, GlobalSaveManager } from "./SaveManager";
-import { GlobalGrabManager } from './GrabManager';
+import { GlobalGrabManager, GrabListener } from './GrabManager';
 
 declare global {
     interface HTMLElement {
@@ -60,6 +60,7 @@ export default class InputManager {
     private keyTriggerListeners = new Map<string, Listener[]>();
     private usePointerLock: boolean = true;
     public isInteractive: boolean = true;
+    public nonInteractiveListener: GrabListener | undefined;
 
     private touchGesture: TouchGesture = TouchGesture.None;
     private prevTouchX: number = 0; // When scrolling, contains finger X; when pinching, contains midpoint X
@@ -86,8 +87,12 @@ export default class InputManager {
         });
         this.toplevel.addEventListener('wheel', this._onWheel, { passive: false });
         this.toplevel.addEventListener('mousedown', (e) => {
-            if (!this.isInteractive)
+            console.log(e);
+            if (!this.isInteractive) {
+                if (this.nonInteractiveListener)
+                    GlobalGrabManager.takeGrab(this.nonInteractiveListener, e, { takePointerLock: false, useGrabbingCursor: true, releaseOnMouseUp: true });
                 return;
+            }
             this.buttons = e.buttons;
             GlobalGrabManager.takeGrab(this, e, { takePointerLock: this.usePointerLock, useGrabbingCursor: true, releaseOnMouseUp: this.releaseOnMouseUp });
             if (this.ondraggingmodechanged !== null)

@@ -15,6 +15,7 @@ import { WebXRContext } from './WebXR';
 import { MathConstants } from './MathHelpers';
 import { IS_DEVELOPMENT } from './BuildVersion';
 import { GlobalSaveManager } from './SaveManager';
+import { GrabListener } from './GrabManager';
 
 export interface ViewerUpdateInfo {
     time: number;
@@ -45,6 +46,7 @@ export interface SceneGfx {
     createCameraController?(): CameraController;
     adjustCameraController?(c: CameraController): void;
     isInteractive?: boolean;
+    nonInteractiveListener?: GrabListener;
     serializeSaveState?(dst: ArrayBuffer, offs: number): number;
     deserializeSaveState?(src: ArrayBuffer, offs: number, byteLength: number): number;
     onstatechanged?: () => void;

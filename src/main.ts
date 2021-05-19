@@ -92,6 +92,7 @@ import { DataShare } from './DataShare';
 import InputManager from './InputManager';
 import { WebXRContext } from './WebXR';
 import { debugJunk } from './DebugJunk';
+import { GrabListener } from './GrabManager';
 
 const sceneGroups = [
     /*
@@ -396,6 +397,8 @@ class Main {
             this._toggleUI();
         if (inputManager.isKeyDownEventTriggered('KeyT'))
             this.ui.sceneSelect.expandAndFocus();
+        if (inputManager.isKeyDownEventTriggered('KeyP'))
+            this.viewer.inputManager.isInteractive = !this.viewer.inputManager.isInteractive;
         for (let i = 1; i <= 9; i++) {
             if (inputManager.isKeyDownEventTriggered('Digit'+i)) {
                 if (this.currentSceneDesc) {
@@ -654,6 +657,8 @@ class Main {
 
         const isInteractive = fallbackUndefined<boolean>(scene.isInteractive, true);
         this.viewer.inputManager.isInteractive = isInteractive;
+
+        this.viewer.inputManager.nonInteractiveListener = scene.nonInteractiveListener;
 
         const sceneDescId = this._getCurrentSceneDescId()!;
         this.saveManager.setCurrentSceneDescId(sceneDescId);
