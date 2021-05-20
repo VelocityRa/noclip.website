@@ -192,6 +192,11 @@ function mat4Str(m: mat4) {
     return str;
 }
 
+interface Sphere {
+    center: vec3;
+    radius: number;
+}
+
 export class Sly2Renderer implements Viewer.SceneGfx {
     public textureHolder = new FakeTextureHolder([]);
 
@@ -200,6 +205,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
     private modelMatrix: mat4 = mat4.create();
     private meshRenderers: Sly2MeshRenderer[] = [];
     private meshRenderersReverse: Sly2MeshRenderer[] = [];
+
 
     public nonInteractiveListener: GrabListener = this;
 
@@ -218,12 +224,13 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         const gfxCache = this.renderHelper.getCache();
 
         for (let object of objects) {
-            // if (object.header.index == 286)
-            // continue;
+            // if (object.header.index != 286)
+            // if (object.header.index != 269)
+                // if (object.header.index < 50 || object.header.index > 100)
+                // continue;
 
             for (let meshContainer of object.meshContainers) {
                 for (let mesh of meshContainer.meshes) {
-
                     let meshInstanceMatrices = [mat4.create()];
 
                     for (let meshInstance of mesh.instances)
@@ -409,9 +416,8 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
         for (let debugRay of this.debugRays) {
             let randomColor = colorNewFromRGBA(0, 0, 0);
-            const f = (debugRay.pos[0] + debugRay.pos[1] + debugRay.pos[2] + debugRay.dir[0] + debugRay.dir[1] + debugRay.dir[2]) % 1;
-            console.log(f);
-            colorFromHSL(randomColor, f, 0.5, 0.5, 1.0);
+            const pseudoRandomFloat = (debugRay.pos[0] + debugRay.pos[1] + debugRay.pos[2] + debugRay.dir[0] + debugRay.dir[1] + debugRay.dir[2]) % 1;
+            colorFromHSL(randomColor, pseudoRandomFloat, 0.5, 0.5, 1.0);
             drawWorldSpaceVector(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, debugRay.pos, debugRay.dir, 1000, randomColor, 5);
         }
 
@@ -535,9 +541,45 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
         const rayPos = mat4.getTranslation(vec3.create(), this.viewerInput.camera.worldMatrix);
 
-        this.debugRays.push({ pos: rayPos, dir: rayWorld });
-        // this.debugLines.push({ posStart: lineStartFinal, posEnd: lineEndFinal });
+        const ray = { pos: rayPos, dir: rayWorld };
+        this.debugRays.push(ray);
 
+        let hitSphere = (sphere: Sphere, ray: Ray) => {
+            // Reference: https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-sphere-intersection
+            const l = vec3.subtract(vec3.create(), sphere.center, ray.pos);
+            const tca = vec3.dot(l, ray.dir);
+
+            const d2 = vec3.dot(l, l) - tca * tca;
+            const radius2 = sphere.radius * sphere.radius;
+            if (d2 > radius2)
+                return false;
+
+            const thc = Math.sqrt(radius2 - d2);
+            let t0 = tca - thc;
+            let t1 = tca + thc;
+
+            if (t0 > t1)
+                [t0, t1] = [t1, t0];
+
+            if (t0 < 0) {
+                t0 = t1; // if t0 is negative, let's use t1 instead
+                if (t0 < 0)
+                    return false; // both t0 and t1 are negative
+            }
+
+            return true;
+        };
+
+        // console.log(`ray: ${vec3Str(ray.pos)}  ${vec3Str(ray.dir)}`);
+        for (let meshRenderer of this.meshRenderers) {
+            for (let i = 0; i < meshRenderer.aabbSpheres.length; ++i) {
+                const meshAABBSphere = meshRenderer.aabbSpheres[i];
+
+                // console.log(` sphere r ${meshAABBSphere.radius}  ${vec3Str(meshAABBSphere.center)}`);
+                if (hitSphere(meshAABBSphere, ray))
+                    meshRenderer.aabbs[i].active = true;
+            }
+        }
     }
     public onMotion(dx: number, dy: number): void {
         // console.log(dx, dy);
@@ -659,6 +701,18 @@ const textureMappingScratch = nArray(2, () => new TextureMapping());
 
 const viewMatScratch = mat4.create();
 const modelViewMatScratch = mat4.create();
+const modelViewMatScratch2 = mat4.create();
+
+const DRAW_ALL_AABBS = false;
+
+const worldRotX = mat4.fromXRotation(mat4.create(), 3 * 90 * MathConstants.DEG_TO_RAD);
+
+export class EditorAABB extends AABB {
+    active = false;
+}
+
+// TODO add spheres to EditorAABB
+// TODO
 
 export class Sly2MeshRenderer {
     public textureMatrix = mat4.create();
@@ -675,9 +729,14 @@ export class Sly2MeshRenderer {
         this.visible = v;
     }
 
-    private rotX: mat4 = mat4.create();
-
     private instanceMatrices: mat4[] = [];
+
+    public aabbs: EditorAABB[] = [];
+    public aabbSpheres: Sphere[] = [];
+    public aabbColor: Color;
+    public aabbIsHuge = false;
+
+    public drawAABB = false;
 
     constructor(
         textureData: (TextureData | null)[],
@@ -710,10 +769,29 @@ export class Sly2MeshRenderer {
             blendDstFactor: GfxBlendFactor.ONE_MINUS_SRC_ALPHA,
         });
 
-        this.rotX = mat4.fromXRotation(this.rotX, 3 * 90 * MathConstants.DEG_TO_RAD);
-
         for (let meshInstanceMatrix of meshInstanceMatrices)
             this.instanceMatrices.push(meshInstanceMatrix)
+
+        for (let meshInstanceMatrix of meshInstanceMatrices) {
+            let aabb = new EditorAABB();
+            aabb.setFromPointsFloatArray(meshChunk.positions);
+            mat4.copy(modelViewMatScratch2, worldRotX);
+            mat4.mul(modelViewMatScratch2, modelViewMatScratch2, meshInstanceMatrix);
+            aabb.transform(aabb, modelViewMatScratch2);
+            this.aabbs.push(aabb);
+
+            let center = vec3.create();
+            aabb.centerPoint(center);
+            let radius = aabb.boundingSphereRadius();
+            this.aabbSpheres.push({ center, radius });
+        }
+
+        const firstExtent = this.aabbs[0].extents(vec3.create());
+        const pseudoRandomFloat = (vec3.length(firstExtent)) % 1;
+        let randomColor = colorFromHSL(colorNewFromRGBA(0, 0, 0), pseudoRandomFloat, 0.5, 0.5, 0.3);
+        this.aabbColor = randomColor;
+
+        this.aabbIsHuge = vec3.length(firstExtent) > 10000;
     }
 
     public prepareToRender(renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput) {
@@ -760,7 +838,7 @@ export class Sly2MeshRenderer {
 
             mat4.copy(modelViewMatScratch, viewMatScratch);
 
-            mat4.mul(modelViewMatScratch, modelViewMatScratch, this.rotX);
+            mat4.mul(modelViewMatScratch, modelViewMatScratch, worldRotX);
             mat4.mul(modelViewMatScratch, modelViewMatScratch, instanceMatrix);
 
             if (this.isSkybox)
@@ -774,6 +852,12 @@ export class Sly2MeshRenderer {
 
             if (renderHacks.disableMeshInstances)
                 break;
+        }
+
+        if (!this.isSkybox && !this.aabbIsHuge) {
+            for (let aabb of this.aabbs)
+                if (DRAW_ALL_AABBS || aabb.active)
+                    drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, aabb, mat4.create(), this.aabbColor);
         }
 
         renderInstManager.popTemplateRenderInst();
