@@ -69,8 +69,6 @@ export function resizeCanvas(canvas: HTMLCanvasElement, width: number, height: n
     canvas.height = height * devicePixelRatio;
 }
 
-const DEFAULT_NUM_SAMPLES = 4;
-
 export class Viewer {
     public inputManager: InputManager;
     public cameraController: CameraController | null = null;

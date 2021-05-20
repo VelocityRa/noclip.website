@@ -1175,8 +1175,8 @@ class FrameDebouncer {
     public trigger(): void {
         if (this.timeoutId !== null)
             this.clear();
-        if (this.callback !== null)
-            this.timeoutId = setTimeout(this.onframe, this.timeout);
+        // if (this.callback !== null)
+            // this.timeoutId = setTimeout(this.onframe, this.timeout);
     }
 
     public clear() {

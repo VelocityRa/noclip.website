@@ -116,6 +116,20 @@ export class AABB {
         }
     }
 
+    public setFromPointsFloatArray(points: Float32Array): void {
+        this.minX = this.minY = this.minZ = Infinity;
+        this.maxX = this.maxY = this.maxZ = -Infinity;
+
+        for (let i = 0; i < points.length / 3; i++) {
+            this.minX = Math.min(this.minX, points[i * 3 + 0]);
+            this.minY = Math.min(this.minY, points[i * 3 + 1]);
+            this.minZ = Math.min(this.minZ, points[i * 3 + 2]);
+            this.maxX = Math.max(this.maxX, points[i * 3 + 0]);
+            this.maxY = Math.max(this.maxY, points[i * 3 + 1]);
+            this.maxZ = Math.max(this.maxZ, points[i * 3 + 2]);
+        }
+    }
+
     public union(a: AABB, b: AABB): void {
         this.minX = Math.min(a.minX, b.minX);
         this.minY = Math.min(a.minY, b.minY);
@@ -184,10 +198,11 @@ export class AABB {
             pZ < this.minZ - rad || pZ > this.maxZ + rad);
     }
 
-    public extents(v: vec3): void {
+    public extents(v: vec3): vec3 {
         v[0] = Math.max((this.maxX - this.minX) / 2, 0);
         v[1] = Math.max((this.maxY - this.minY) / 2, 0);
         v[2] = Math.max((this.maxZ - this.minZ) / 2, 0);
+        return v;
     }
 
     public diagonalLengthSquared(): number {
@@ -197,13 +212,14 @@ export class AABB {
         return dx*dx + dy*dy + dz*dz;
     }
 
-    public centerPoint(v: vec3): void {
+    public centerPoint(v: vec3): vec3 {
         v[0] = (this.minX + this.maxX) / 2;
         v[1] = (this.minY + this.maxY) / 2;
         v[2] = (this.minZ + this.maxZ) / 2;
+        return v;
     }
 
-    public cornerPoint(dst: vec3, i: number): void {
+    public cornerPoint(dst: vec3, i: number): vec3 {
         if (i === 0)
             vec3.set(dst, this.minX, this.minY, this.minZ);
         else if (i === 1)
@@ -220,6 +236,7 @@ export class AABB {
             vec3.set(dst, this.minX, this.maxY, this.maxZ);
         else if (i === 7)
             vec3.set(dst, this.maxX, this.maxY, this.maxZ);
+        return dst;
     }
 
     public boundingSphereRadius(): number {

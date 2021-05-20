@@ -36,7 +36,7 @@ export class Graph {
     public clear(): void {
         const ctx = this.ctx;
         ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);    
+        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
         ctx.strokeStyle = '#aaaaaa';
         ctx.lineWidth = 1;
@@ -238,7 +238,7 @@ export function drawWorldSpaceBasis(ctx: CanvasRenderingContext2D, clipFromWorld
     drawWorldSpaceVector(ctx, clipFromWorldMatrix, scratchVec3a, scratchVec3b, mag, Blue, thickness);
 }
 
-export function drawWorldSpaceAABB(ctx: CanvasRenderingContext2D, clipFromWorldMatrix: ReadonlyMat4, aabb: AABB, m: mat4 | null = null, color: Color = Magenta): void {
+export function drawWorldSpaceAABB(ctx: CanvasRenderingContext2D, clipFromWorldMatrix: ReadonlyMat4, aabb: AABB, m: mat4 | null = null, color: Color = Magenta, thickness = 2): void {
     vec4.set(p[0], aabb.minX, aabb.minY, aabb.minZ, 1.0);
     vec4.set(p[1], aabb.maxX, aabb.minY, aabb.minZ, 1.0);
     vec4.set(p[2], aabb.minX, aabb.maxY, aabb.minZ, 1.0);
@@ -248,7 +248,7 @@ export function drawWorldSpaceAABB(ctx: CanvasRenderingContext2D, clipFromWorldM
     vec4.set(p[6], aabb.minX, aabb.maxY, aabb.maxZ, 1.0);
     vec4.set(p[7], aabb.maxX, aabb.maxY, aabb.maxZ, 1.0);
     if (m !== null)
-        for (let i = 0; i < 8; i++) 
+        for (let i = 0; i < 8; i++)
             vec4.transformMat4(p[i], p[i], m);
     transformToClipSpace(clipFromWorldMatrix, p, 8);
 
@@ -266,7 +266,7 @@ export function drawWorldSpaceAABB(ctx: CanvasRenderingContext2D, clipFromWorldM
     drawClipSpaceLine(ctx, p[2], p[6]);
     drawClipSpaceLine(ctx, p[3], p[7]);
     ctx.closePath();
-    ctx.lineWidth = 2;
+    ctx.lineWidth = thickness;
     ctx.strokeStyle = colorToCSS(color);
     ctx.stroke();
 }

@@ -162,7 +162,7 @@ function piecewiseHSL(m0: number, m1: number, t: number) {
     }
 }
 
-export function colorFromHSL(dst: Color, hue: number, saturation: number, lightness: number, a: number = 1.0) {
+export function colorFromHSL(dst: Color, hue: number, saturation: number, lightness: number, a: number = 1.0): Color {
     if (saturation === 0.0) {
         colorFromRGBA(dst, lightness, lightness, lightness);
     } else {
@@ -178,6 +178,7 @@ export function colorFromHSL(dst: Color, hue: number, saturation: number, lightn
         dst.b = piecewiseHSL(m0, m1, h - 2.0);
         dst.a = a;
     }
+    return dst;
 }
 
 export const TransparentBlack = colorNewFromRGBA(0, 0, 0, 0);
