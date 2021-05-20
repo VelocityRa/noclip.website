@@ -502,7 +502,6 @@ export class Sly2Renderer implements Viewer.SceneGfx {
     // GrabListener
     //
     public onGrab(e: MouseEvent): void {
-
         /*
                 const viewMatrix = this.viewerInput.camera.viewMatrix;
                 const projMatrix = this.viewerInput.camera.projectionMatrix;
@@ -542,22 +541,23 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         */
 
         console.log(e);
-        console.log(`clientX: ${e.clientX} clientY: ${e.clientY}`);
-
-        console.log(this.viewerInput.backbufferWidth);
+        console.log(`client: ${e.clientX}  ${e.clientY}`);
+        console.log(`buf ${this.viewerInput.backbufferWidth} x ${this.viewerInput.backbufferHeight}`);
 
         // Reference: https://antongerdelan.net/opengl/raycasting.html
 
+        console.log(`X ${e.clientX * window.devicePixelRatio} Y ${e.clientY * window.devicePixelRatio}`);
+
         // Viewport (2D) -> NDC (3D)
-        const mouseClipX = 2 * e.clientX / this.viewerInput.backbufferWidth - 1;
-        const mouseClipY = 2 * e.clientY / this.viewerInput.backbufferHeight - 1;
+        const mouseClipX = 2 * e.clientX * window.devicePixelRatio / this.viewerInput.backbufferWidth - 1;
+        const mouseClipY = 2 * e.clientY * window.devicePixelRatio / this.viewerInput.backbufferHeight - 1;
         const rayNdc = vec3.fromValues(mouseClipX, mouseClipY, 1.0);
 
         // NDC (3D) -> Homogeneous clip (4D)
         // Negative Z to point forwards. W 1 for identity.
         const rayClip = vec4.fromValues(rayNdc[0], rayNdc[1], -1, 1);
 
-        console.log(`mouseClipX: ${mouseClipX} mouseClipY: ${mouseClipY}`);
+        console.log(`mouseClip: ${mouseClipX}  ${mouseClipY}`);
         console.log(`rayNdc: ${vec3Str(rayNdc)}`);
         console.log(`rayClip: ${vec4Str(rayClip)}`);
 

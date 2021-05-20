@@ -3264,6 +3264,9 @@ class PanelButton extends SingleIconButton {
         }
     }
 
+    public onGrab(e: MouseEvent): void {
+    }
+
     public onMotion(): void {
         // Doesn't matter.
     }
