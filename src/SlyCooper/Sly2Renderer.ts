@@ -18,7 +18,7 @@ import { Texture } from "./SlyData";
 import { DynamicObjectInstance, LevelObject, parseObjectEntries, TextureContainer, MeshContainer, MeshChunk, Mesh } from './Sly2Data';
 import * as Settings from './SlyConstants';
 import { drawWorldSpaceAABB, getDebugOverlayCanvas2D, drawWorldSpacePoint, drawWorldSpaceVector, drawWorldSpaceLine } from "../DebugJunk";
-import { Color, Magenta, colorToCSS, Red, Green, Blue, Cyan } from "../Color";
+import { colorNewFromRGBA, Color, Magenta, colorToCSS, Red, Green, Blue, Cyan, colorFromHSL, OpaqueBlack } from "../Color";
 import { GfxBuffer, GfxInputLayout, GfxInputState, GfxBufferUsage, GfxVertexAttributeDescriptor, GfxFormat, GfxInputLayoutBufferDescriptor, GfxVertexBufferFrequency } from "../gfx/platform/GfxPlatform";
 import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache";
@@ -183,7 +183,7 @@ function mat4Str(m: mat4) {
     let str = "\t";
     for (let y = 0; y < 4; y++) {
         for (let x = 0; x < 4; x++) {
-            str += `${m[x + y*4].toFixed(3)} `;
+            str += `${m[x + y * 4].toFixed(3)} `;
         }
         str += '\n';
         if (y != 3)
@@ -407,11 +407,17 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         // }
         // }
 
-        for (let debugRay of this.debugRays)
-            drawWorldSpaceVector(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, debugRay.pos, debugRay.dir, 1000);
+        for (let debugRay of this.debugRays) {
+            let randomColor = colorNewFromRGBA(0, 0, 0);
+            const f = (debugRay.pos[0] + debugRay.pos[1] + debugRay.pos[2] + debugRay.dir[0] + debugRay.dir[1] + debugRay.dir[2]) % 1;
+            console.log(f);
+            colorFromHSL(randomColor, f, 0.5, 0.5, 1.0);
+            drawWorldSpaceVector(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, debugRay.pos, debugRay.dir, 1000, randomColor, 5);
+        }
 
-        for (let debugLine of this.debugLines)
+        for (let debugLine of this.debugLines) {
             drawWorldSpaceLine(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, debugLine.posStart, debugLine.posEnd, Cyan);
+        }
     }
 
     private setTexturesEnabled(enabled: boolean) {
@@ -502,64 +508,16 @@ export class Sly2Renderer implements Viewer.SceneGfx {
     // GrabListener
     //
     public onGrab(e: MouseEvent): void {
-        /*
-                const viewMatrix = this.viewerInput.camera.viewMatrix;
-                const projMatrix = this.viewerInput.camera.projectionMatrix;
-
-                const invProjMatrix = mat4.invert(mat4.create(), projMatrix);
-                const invViewMatrix = mat4.invert(mat4.create(), viewMatrix);
-        */
-                /*
-                    vec3 ray_nds = vec3(x, y, 1.0);
-                    vec4 ray_clip = vec4(ray_nds.x, ray_nds.y, -1.0f, 1.0f);
-                    vec4 ray_eye = inverse(projection) * ray_clip;
-                         ray_eye = vec4(ray_eye.x, ray_eye.y, -1.0f, 0.0f);
-                    result = normalize(inverse(camera.view()) * ray_eye);
-                */
-
-                /*
-                    //works for right handed coordinates. So it is opengl friendly.
-                    float mx = (float)((pixel.x - screenResolution.x * 0.5) * (1.0 / screenResolution.x) * camera.fovX * 0.5);
-                    float my = (float)((pixel.y - screenResolution.y * 0.5) * (1.0 / screenResolution.x) * camera.fovX * 0.5);
-                    float4 dx = cameraRight * mx;
-                    float4 dy = cameraUp * my;
-
-                    float3 dir = normalize(cameraDir + (dx + dy).xyz * 2.0);
-                */
-
-                // const mx =
-
-        /*
-                const rayClip = vec4.fromValues(mouseX, mouseY, -1, 1);
-                let rayEye = vec4.transformMat4(vec4.create(), rayClip, invProjMatrix);
-                const rayEye2 = vec4.fromValues(rayEye[0], rayEye[1], -1, 1); // what ?
-                let rayDir = vec4.transformMat4(vec4.create(), rayEye2, invViewMatrix);
-                vec4.normalize(rayDir, rayDir);
-                vec4.scale(rayDir, rayDir, -1);
-
-                const rayDirVec3 = vec3.fromValues(rayDir[0], rayDir[1], rayDir[2]);
-        */
-
-        console.log(e);
-        console.log(`client: ${e.clientX}  ${e.clientY}`);
-        console.log(`buf ${this.viewerInput.backbufferWidth} x ${this.viewerInput.backbufferHeight}`);
-
         // Reference: https://antongerdelan.net/opengl/raycasting.html
-
-        console.log(`X ${e.clientX * window.devicePixelRatio} Y ${e.clientY * window.devicePixelRatio}`);
 
         // Viewport (2D) -> NDC (3D)
         const mouseClipX = 2 * e.clientX * window.devicePixelRatio / this.viewerInput.backbufferWidth - 1;
-        const mouseClipY = 2 * e.clientY * window.devicePixelRatio / this.viewerInput.backbufferHeight - 1;
+        const mouseClipY = (2 * e.clientY * window.devicePixelRatio / this.viewerInput.backbufferHeight - 1) * -1;
         const rayNdc = vec3.fromValues(mouseClipX, mouseClipY, 1.0);
 
         // NDC (3D) -> Homogeneous clip (4D)
         // Negative Z to point forwards. W 1 for identity.
         const rayClip = vec4.fromValues(rayNdc[0], rayNdc[1], -1, 1);
-
-        console.log(`mouseClip: ${mouseClipX}  ${mouseClipY}`);
-        console.log(`rayNdc: ${vec3Str(rayNdc)}`);
-        console.log(`rayClip: ${vec4Str(rayClip)}`);
 
         // Homogeneous clip (4D) -> Eye (4D)
         const projMatrix = this.viewerInput.camera.projectionMatrix;
@@ -576,52 +534,6 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         vec3.normalize(rayWorld, rayWorld);
 
         const rayPos = mat4.getTranslation(vec3.create(), this.viewerInput.camera.worldMatrix);
-
-        //
-/*
-        const worldFromClipMatrix = mat4.invert(mat4.create(), this.viewerInput.camera.clipFromWorldMatrix);
-        console.log(`worldFromClipMatrix:\n${mat4Str(worldFromClipMatrix)}`);
-
-        const clipLineStart = vec4.fromValues(clipMouseX, clipMouseY, -1, 1);
-        const clipLineEnd = vec4.fromValues(clipMouseX, clipMouseY, -1, 1);
-
-        // Clip space -> world space
-        let worldLineStart = vec4.transformMat4(vec4.create(), clipLineStart, worldFromClipMatrix);
-        let worldLineEnd = vec4.transformMat4(vec4.create(), clipLineEnd, worldFromClipMatrix);
-
-        console.log(`clipLineStart:\n${vec4Str(clipLineStart)}`);
-        console.log(`clipLineEnd:\n${vec4Str(clipLineEnd)}`);
-        console.log(`worldLineStart:\n${vec4Str(worldLineStart)}`);
-        console.log(`worldLineEnd:\n${vec4Str(worldLineEnd)}`);
-
-        // vec4.scale(worldLineStart, worldLineStart, 1 / worldLineStart[3]);
-        // vec4.scale(worldLineEnd, worldLineEnd, 1 / worldLineEnd[3]);
-
-        console.log(`worldLineStartDiv:\n${vec4Str(worldLineStart)}`);
-        console.log(`worldLineEndDiv:\n${vec4Str(worldLineEnd)}`);
-
-        const lineStartFinal = vec3.fromValues(worldLineStart[0], worldLineStart[1], worldLineStart[2]);
-        const lineEndFinal = vec3.fromValues(worldLineEnd[0], worldLineEnd[1], worldLineEnd[2]);
-
-        const rayPos = mat4.getTranslation(vec3.create(), this.viewerInput.camera.worldMatrix);
-
-        // let rayDir = vec3.scale(vec3.create(), lineEndFinal, -1);
-        // console.log(`rayDir:\n${vec3Str(rayDir)}`);
-        // vec3.normalize(rayDir, rayDir);
-        // console.log(`rayDirNorm:\n${vec3Str(rayDir)}`);
-
-        let rayDir = vec3.create();
-        vec3.normalize(rayDir, lineEndFinal);
-        console.log(`rayDir:\n${vec3Str(rayDir)}`);
-        // vec3.scale(rayDir, lineEndFinal, -1);
-        console.log(`rayDirScale:\n${vec3Str(rayDir)}`);
-*/
-
-
-        // let rayDir = vec3.subtract(vec3.create(), lineEndFinal, lineStartFinal);
-        // vec3.normalize(rayDir, rayDir);
-
-        // vec3.scale(rayDir, rayDir, -1);
 
         this.debugRays.push({ pos: rayPos, dir: rayWorld });
         // this.debugLines.push({ posStart: lineStartFinal, posEnd: lineEndFinal });
