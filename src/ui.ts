@@ -120,6 +120,38 @@ function svgStringToCSSBackgroundImage(svgString: string) {
     return `url(data:image/svg+xml,${encodeURI(svgString)})`;
 }
 
+export class Button implements Widget {
+    public elem: HTMLElement;
+    public onmousedown: ((e: MouseEvent) => void) | null = null;
+    public onmouseup: ((e: MouseEvent) => void) | null = null;
+
+    constructor(text: string) {
+        this.elem = document.createElement('div');
+
+        const btnDiv = document.createElement('div');
+        btnDiv.style.fontWeight = `bold`;
+        btnDiv.style.textAlign = `center`;
+        btnDiv.style.lineHeight = `24px`;
+        btnDiv.style.cursor = `pointer`;
+        btnDiv.textContent = text;
+        btnDiv.onmousedown = (e: MouseEvent) => {
+            setElementHighlighted(btnDiv, true);
+
+            if (this.onmousedown !== null)
+                this.onmousedown(e);
+        }
+        btnDiv.onmouseup = (e: MouseEvent) => {
+            setElementHighlighted(btnDiv, false);
+
+            if (this.onmouseup !== null)
+                this.onmouseup(e);
+        }
+        setElementHighlighted(btnDiv, false);
+
+        this.elem.appendChild(btnDiv);
+    }
+}
+
 export class TextField implements Widget {
     public textarea: HTMLInputElement;
     public elem: HTMLElement;
@@ -3428,7 +3460,7 @@ class RecordingBranding {
 export class UI {
     public elem: HTMLElement;
 
-    private toplevel: HTMLElement;
+    public toplevel: HTMLElement;
 
     public dragHighlight: HTMLElement;
     public sceneUIContainer: HTMLElement;

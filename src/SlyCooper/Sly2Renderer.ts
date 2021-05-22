@@ -9,7 +9,7 @@ import { GfxRenderInstManager, GfxRendererLayer, makeSortKey, makeSortKeyOpaque 
 import { fillVec2v, fillMatrix4x4, fillMatrix4x3, fillVec4, fillVec4v, fillColor } from "../gfx/helpers/UniformBufferHelpers";
 import { mat4, vec3, vec2, vec4, quat } from "gl-matrix";
 import { computeViewMatrix, CameraController, computeViewMatrixSkybox } from "../Camera";
-import { nArray, assertExists, hexzero0x, hexzero, binzero, binzero0b } from "../util";
+import { nArray, assertExists, hexzero0x, hexzero, binzero, binzero0b, assert } from "../util";
 import { TextureMapping } from "../TextureHolder";
 import { MathConstants, scaleMatrix, transformVec3Mat4w0 } from "../MathHelpers";
 import { AABB } from "../Geometry";
@@ -17,14 +17,19 @@ import { setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorH
 import { Texture } from "./SlyData";
 import { DynamicObjectInstance, LevelObject, parseObjectEntries, TextureContainer, MeshContainer, MeshChunk, Mesh } from './Sly2Data';
 import * as Settings from './SlyConstants';
-import { drawWorldSpaceAABB, getDebugOverlayCanvas2D, drawWorldSpacePoint, drawWorldSpaceVector, drawWorldSpaceLine } from "../DebugJunk";
-import { colorNewFromRGBA, Color, Magenta, colorToCSS, Red, Green, Blue, Cyan, colorFromHSL, OpaqueBlack } from "../Color";
+import { drawWorldSpaceAABB, getDebugOverlayCanvas2D, drawWorldSpacePoint, drawWorldSpaceVector, drawWorldSpaceLine, drawWorldSpaceBasis } from "../DebugJunk";
+import { colorNewFromRGBA, Color, Magenta, colorToCSS, Red, Green, Blue, Cyan, colorFromHSL, OpaqueBlack, White } from "../Color";
 import { GfxBuffer, GfxInputLayout, GfxInputState, GfxBufferUsage, GfxVertexAttributeDescriptor, GfxFormat, GfxInputLayoutBufferDescriptor, GfxVertexBufferFrequency } from "../gfx/platform/GfxPlatform";
 import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache";
 import { GfxrAttachmentSlot, makeBackbufferDescSimple } from '../gfx/render/GfxRenderGraph';
 import { GrabListener } from '../GrabManager';
 import { connectToSceneCollisionEnemyStrongLight } from '../SuperMarioGalaxy/ActorUtil';
+import { FloatingPanel } from '../DebugFloaters';
+import { NamedArrayBufferSlice } from '../DataFetcher';
+import { DataStream } from './DataStream';
+import ArrayBufferSlice from '../ArrayBufferSlice';
+import { downloadBuffer } from '../DownloadUtils';
 
 class SlyRenderHacks {
     disableTextures = false;
@@ -94,6 +99,10 @@ in vec2 v_TexCoord;
 in vec3 v_Normal;
 in vec3 v_VertexColor;
 
+vec3 AdjustContrastCurve(vec3 color, float contrast) {
+    return clamp(mix(vec3(0.5, 0.5, 0.5), color, contrast), 0.0, 1.0);
+}
+
 void main() {
     // gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
     // return;
@@ -141,6 +150,9 @@ void main() {
 
     gl_FragColor.rgb = (ambientFinal * tc1_w + unkFinal) * 4.0;
 
+    gl_FragColor.rgb *= 1.2;
+
+    // gl_FragColor.rgb = AdjustContrastCurve(gl_FragColor.rgb, 1.1);
 #endif
 }
 `;
@@ -162,13 +174,60 @@ const bindingLayouts: GfxBindingLayoutDescriptor[] = [
     { numUniformBuffers: 2, numSamplers: 1, },
 ];
 
-interface Ray {
-    pos: vec3;
-    dir: vec3;
+class Ray {
+    private sign = new Uint8Array(3);
+    private invDir: vec3;
+
+    constructor(public pos: vec3, public dir: vec3) {
+        this.invDir = vec3.inverse(vec3.create(), dir);
+
+        this.sign[0] = (this.invDir[0] < 0) ? 1 : 0;
+        this.sign[1] = (this.invDir[1] < 0) ? 1 : 0;
+        this.sign[2] = (this.invDir[2] < 0) ? 1 : 0;
+    }
+
+    public intersectAABB(aabb: EditorAABB): boolean {
+        // Reference: https://gamedev.stackexchange.com/a/18459
+
+        const t1 = (aabb.minX - this.pos[0]) * this.invDir[0];
+        const t2 = (aabb.maxX - this.pos[0]) * this.invDir[0];
+        const t3 = (aabb.minY - this.pos[1]) * this.invDir[1];
+        const t4 = (aabb.maxY - this.pos[1]) * this.invDir[1];
+        const t5 = (aabb.minZ - this.pos[2]) * this.invDir[2];
+        const t6 = (aabb.maxZ - this.pos[2]) * this.invDir[2];
+
+        const tMin = Math.max(Math.max(Math.min(t1, t2), Math.min(t3, t4)), Math.min(t5, t6));
+        const tMax = Math.min(Math.min(Math.max(t1, t2), Math.max(t3, t4)), Math.max(t5, t6));
+
+        let t: number;
+
+        // if tMax < 0, ray (line) is intersecting AABB, but the whole AABB is behind us
+        if (tMax < 0) {
+            t = tMax;
+            return false;
+        }
+
+        // if tMin > tMax, ray doesn't intersect AABB
+        if (tMin > tMax) {
+            t = tMax;
+            return false;
+        }
+
+        t = tMin;
+
+        const hitFront = t > 0;
+        return hitFront;
+    }
 }
+
 interface Line {
     posStart: vec3;
     posEnd: vec3;
+}
+
+interface Sphere {
+    center: vec3;
+    radius: number;
 }
 
 function vec3Str(v: vec3) {
@@ -192,9 +251,109 @@ function mat4Str(m: mat4) {
     return str;
 }
 
-interface Sphere {
-    center: vec3;
-    radius: number;
+let gSly2Renderer: Sly2Renderer;
+
+class EditorPanel extends FloatingPanel {
+    private enableBtn: HTMLElement;
+    private disableBtn: HTMLElement;
+    private bakeBtn: HTMLElement;
+
+    private editorPanelContents: HTMLElement;
+
+    private editorModeEnabled = false;
+
+    // TODO: no ondrag... just radiobuttons for Plane select
+    // after selection, to prevent drag
+    // get started on emitting
+    // orientate more correctly based on view
+    // todo plane translate btns, reset btn, rotate, scale
+
+    constructor(private ui: UI.UI, private viewer: Viewer.Viewer) {
+        super();
+        this.setWidth(500);
+        this.contents.style.maxHeight = '';
+        this.contents.style.overflow = '';
+        this.elem.onmouseout = () => {
+            this.elem.style.opacity = '0.8';
+        };
+        this.elem.style.opacity = '0.8';
+        this.setTitle(UI.SAND_CLOCK_ICON, 'Editor');
+        document.head.insertAdjacentHTML('beforeend', `
+        <style>
+            button.EditorButton {
+                font: 16px monospace;
+                font-weight: bold;
+                border: none;
+                width: 100%;
+                color: inherit;
+                padding: 0.15rem;
+                text-align: center;
+                background-color: rgb(64, 64, 64);
+                cursor: pointer;
+                draggable: true;
+            }
+        </style>
+        `);
+        this.contents.insertAdjacentHTML('beforeend', `
+        <div style="display: grid; grid-template-columns: 3fr 1fr 1fr; align-items: center;">
+            <div class="SettingsHeader">Editor Mode</div>
+            <button id="enableBtn" class="EditorButton EnableEditorMode">Enable</button>
+            <button id="disableBtn" class="EditorButton DisableEditorMode">Disable</button>
+        </div>
+        <button id="bakeBtn" class="EditorButton">Bake</button>
+        <div id="editorPanelContents" hidden></div>
+
+        `);
+        this.contents.style.lineHeight = '36px';
+        this.enableBtn = this.contents.querySelector('#enableBtn') as HTMLInputElement;
+        this.disableBtn = this.contents.querySelector('#disableBtn') as HTMLInputElement;
+        this.editorPanelContents = this.contents.querySelector('#editorPanelContents') as HTMLElement;
+
+        // A listener to give focus to the canvas whenever it's clicked, even if the panel is still up.
+        const keepFocus = function (e: MouseEvent) {
+            if (e.target === viewer.canvas)
+                document.body.focus();
+        }
+
+        this.bakeBtn.onclick = () => {
+            gSly2Renderer.bake();
+        }
+
+        this.enableBtn.onclick = () => {
+            if (!this.editorModeEnabled) {
+                this.editorModeEnabled = true;
+                this.editorPanelContents.removeAttribute('hidden');
+                document.addEventListener('mousedown', keepFocus);
+                UI.setElementHighlighted(this.enableBtn, true);
+                UI.setElementHighlighted(this.disableBtn, false);
+            }
+        }
+        this.disableBtn.onclick = () => {
+            if (this.editorModeEnabled) {
+                this.editorModeEnabled = false;
+                this.editorPanelContents.setAttribute('hidden', '');
+                document.removeEventListener('mousedown', keepFocus);
+                UI.setElementHighlighted(this.disableBtn, true);
+                UI.setElementHighlighted(this.enableBtn, false);
+            }
+        };
+        this.disableBtn.draggable = true;
+        let start = { x: 0, y: 0 };
+        this.disableBtn.ondragstart = (e: DragEvent) => {
+            start = { x: e.clientX, y: e.clientY };
+        };
+        this.disableBtn.ondrag = (e: DragEvent) => {
+            let delta = { x: e.clientX - start.x, y: e.clientY - start.y }
+            start = { x: e.clientX, y: e.clientY };
+
+            // console.log(delta);
+            gSly2Renderer.translateSelectedMesh(vec3.fromValues(delta.x, delta.y, 0));
+        };
+        UI.setElementHighlighted(this.disableBtn, true);
+        UI.setElementHighlighted(this.enableBtn, false);
+
+        this.elem.style.display = 'none';
+    }
 }
 
 export class Sly2Renderer implements Viewer.SceneGfx {
@@ -204,8 +363,9 @@ export class Sly2Renderer implements Viewer.SceneGfx {
     private renderHelper: GfxRenderHelper;
     private modelMatrix: mat4 = mat4.create();
     private meshRenderers: Sly2MeshRenderer[] = [];
-    private meshRenderersReverse: Sly2MeshRenderer[] = [];
+    // private meshRenderersReverse: Sly2MeshRenderer[] = [];
 
+    // Editor stuff
 
     public nonInteractiveListener: GrabListener = this;
 
@@ -214,11 +374,25 @@ export class Sly2Renderer implements Viewer.SceneGfx {
     private debugRays: Ray[] = [];
     private debugLines: Line[] = [];
 
+    private selectedMesh: (Mesh | null) = null;
+    private selectedMeshInstanceIndex: number;
+
+    //
+
     private createShader(device: GfxDevice) {
         this.program = preprocessProgramObj_GLSL(device, new SlyProgram(renderHacks));
     }
 
-    constructor(device: GfxDevice, objects: LevelObject[], dynObjectInsts: DynamicObjectInstance[], texIdToTex: Map<string, Texture>) {
+    constructor(
+        device: GfxDevice,
+        private objects: LevelObject[],
+        dynObjInsts: DynamicObjectInstance[],
+        texIdToTex: Map<string, Texture>,
+        private levelFileName: string,
+        private levelData: NamedArrayBufferSlice
+    ) {
+
+        gSly2Renderer = this;
         this.renderHelper = new GfxRenderHelper(device);
 
         const gfxCache = this.renderHelper.getCache();
@@ -226,35 +400,41 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         for (let object of objects) {
             // if (object.header.index != 286)
             // if (object.header.index != 269)
-                // if (object.header.index < 50 || object.header.index > 100)
-                // continue;
+            // if (object.header.index < 50 || object.header.index > 100)
+            // continue;
 
             for (let meshContainer of object.meshContainers) {
                 for (let mesh of meshContainer.meshes) {
+                    let currentMeshRenderers: Sly2MeshRenderer[] = [];
+
                     let meshInstanceMatrices = [mat4.create()];
+                    mesh.instanceAddresses = [0];
 
                     for (let meshInstance of mesh.instances)
                         meshInstanceMatrices.push(mat4.clone(meshInstance));
+                    for (let meshInstanceAddress of mesh.instanceAddresses)
+                        mesh.instanceAddresses.push(meshInstanceAddress);
 
                     // TODO: This is slow!
-                    let dynObjects: mat4[] = [];
-                    for (let dynObjInst of dynObjectInsts) {
+                    let dynObjMats: mat4[] = [];
+                    for (let dynObjInst of dynObjInsts) {
                         if (object.header.id0 == dynObjInst.objId0) {
-                            dynObjects.push(dynObjInst.matrix);
+                            dynObjMats.push(dynObjInst.matrix);
+                            mesh.instanceAddresses.push(dynObjInst.matrixAddress);
                         }
                     }
-                    for (let dynObjInstance of dynObjects)
-                        meshInstanceMatrices.push(mat4.clone(dynObjInstance));
+                    for (let dynObjMat of dynObjMats)
+                        meshInstanceMatrices.push(mat4.clone(dynObjMat));
 
-                    if (mesh.u0 == 0) {
-                        let transformC2 = meshContainer.meshC2Entries[mesh.containerInstanceMatrixIndex].transformMatrix;
-
-                        if (transformC2) {
-                            for (let i = 0; i < meshInstanceMatrices.length; ++i) {
-                                mat4.multiply(meshInstanceMatrices[i], meshInstanceMatrices[i], transformC2!);
-                            }
-                        }
-                    }
+                    // TODO: REENABLE
+                    // if (mesh.u0 == 0) {
+                    //     let transformC2 = meshContainer.meshC2Entries[mesh.containerInstanceMatrixIndex].transformMatrix;
+                    //     if (transformC2) {
+                    //         for (let i = 0; i < meshInstanceMatrices.length; ++i) {
+                    //             mat4.multiply(meshInstanceMatrices[i], meshInstanceMatrices[i], transformC2!);
+                    //         }
+                    //     }
+                    // }
 
                     let chunkIdx = 0;
                     for (let meshChunk of mesh.chunks) {
@@ -279,12 +459,13 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                                 }
                             }
 
-                            const meshRenderer = new Sly2MeshRenderer(textureData, geometryData, meshChunk, isFullyOpaque, meshInstanceMatrices);
-
-                            this.meshRenderers.push(meshRenderer);
+                            currentMeshRenderers.push(new Sly2MeshRenderer(textureData, geometryData, meshChunk, isFullyOpaque, meshInstanceMatrices, mesh, meshContainer, object));
                         }
                         chunkIdx++;
                     }
+
+                    mesh.renderers = currentMeshRenderers;
+                    this.meshRenderers.push(...currentMeshRenderers);
                 }
             }
             // this.meshRenderersReverse = this.meshRenderers.slice().reverse();
@@ -376,53 +557,72 @@ export class Sly2Renderer implements Viewer.SceneGfx {
             }
         }
 
-        // let aabb = new AABB(-1000, -5000, -1000, 100, 5000, 100);
-        // const ctx = getDebugOverlayCanvas2D();
-        // drawWorldSpaceAABB(ctx, viewerInput.camera.clipFromWorldMatrix, aabb);
+        /*
+        let aabb = new AABB(-1000, -5000, -1000, 100, 5000, 100);
+        const ctx = getDebugOverlayCanvas2D();
+        drawWorldSpaceAABB(ctx, viewerInput.camera.clipFromWorldMatrix, aabb);
 
-        // const dbgPos = this.meshRenderers[148].meshChunk.szme?.positions!;
-        // for (let i = 0; i < dbgPos.length; i += 3) {
-        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
-        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Magenta, 50);
-        //     // console.log(`${p}`);
-        // }
-        // dbgPos = this.meshRenderers[148].meshChunk.positions!;
-        // for (let i = 0; i < dbgPos.length; i += 3) {
-        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
-        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Cyan, 20);
-        //     // console.log(`${p}`);
-        // }
+        const dbgPos = this.meshRenderers[148].meshChunk.szme?.positions!;
+        for (let i = 0; i < dbgPos.length; i += 3) {
+            const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+            drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Magenta, 50);
+            // console.log(`${p}`);
+        }
+        dbgPos = this.meshRenderers[148].meshChunk.positions!;
+        for (let i = 0; i < dbgPos.length; i += 3) {
+            const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+            drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Cyan, 20);
+            // console.log(`${p}`);
+        }
 
-        // for (let meshRenderer of this.meshRenderers) {
-        // let dbgPos = meshRenderer.meshChunk.positions;
-        // for (let i = 0; i < dbgPos.length; i += 3) {
-        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
-        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Magenta, 13);
-        // }
+        for (let meshRenderer of this.meshRenderers) {
+        let dbgPos = meshRenderer.meshChunk.positions;
+        for (let i = 0; i < dbgPos.length; i += 3) {
+            const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+            drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Magenta, 13);
+        }
 
-        // if (meshRenderer.meshChunk.szme) {
-        // let orig = meshRenderer.meshChunk.szme?.origin;
-        // let dbgPos = vec3.fromValues(orig[0], orig[2], -orig[1]);
-        // drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, dbgPos, Green, 7);
+        if (meshRenderer.meshChunk.szme) {
+        let orig = meshRenderer.meshChunk.szme?.origin;
+        let dbgPos = vec3.fromValues(orig[0], orig[2], -orig[1]);
+        drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, dbgPos, Green, 7);
 
-        // dbgPos = meshRenderer.meshChunk.szme.positions;
-        // for (let i = 0; i < dbgPos.length; i += 3) {
-        //     const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
-        //     drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Cyan, 4);
-
-        // }
-        // }
-        // }
+        dbgPos = meshRenderer.meshChunk.szme.positions;
+        for (let i = 0; i < dbgPos.length; i += 3) {
+            const p = vec3.fromValues(dbgPos[i + 0], dbgPos[i + 2], -dbgPos[i + 1]);
+            drawWorldSpacePoint(ctx, window.main.viewer.viewerRenderInput.camera.clipFromWorldMatrix, p, Cyan, 4);
+        }}}
+        */
 
         for (let debugRay of this.debugRays) {
             let randomColor = colorNewFromRGBA(0, 0, 0);
             const pseudoRandomFloat = (debugRay.pos[0] + debugRay.pos[1] + debugRay.pos[2] + debugRay.dir[0] + debugRay.dir[1] + debugRay.dir[2]) % 1;
             colorFromHSL(randomColor, pseudoRandomFloat, 0.5, 0.5, 1.0);
-            drawWorldSpaceVector(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, debugRay.pos, debugRay.dir, 1000, randomColor, 5);
+            drawWorldSpaceVector(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, debugRay.pos, debugRay.dir, 2000, randomColor, 3);
         }
 
         for (let debugLine of this.debugLines) {
             drawWorldSpaceLine(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, debugLine.posStart, debugLine.posEnd, Cyan);
+        }
+
+        // drawWorldSpaceBasis(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, mat4.create(), 10000, 1);
+
+        if (this.selectedMesh) {
+            const aabb = this.selectedMesh.aabb!;
+            drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, aabb, mat4.create(), White, 3);
+
+            const aabbCenter = aabb.centerPoint(vec3.create());
+            const aabbExtents = aabb.extents(vec3.create());
+            // const basisScale = Math.min(Math.min(aabbExtents[0], aabbExtents[1], aabbExtents[2]));
+            const basisMat = mat4.fromRotationTranslationScale(mat4.create(), quat.create(), aabbCenter, aabbExtents);
+
+            drawWorldSpaceBasis(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, basisMat, 1, 4);
+
+            for (let renderer of this.selectedMesh.renderers) {
+                // for (let aabb of renderer.aabbs)
+                const aabb = renderer.aabbs[this.selectedMeshInstanceIndex];
+                drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, aabb, mat4.create(), renderer.aabbColor, 1);
+            }
         }
     }
 
@@ -499,6 +699,26 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         debugPanel.contents.appendChild(drawSzmePositionsCheckbox.elem);
         panels.push(debugPanel);
 
+        // const editorPanel = new UI.Panel();
+        // editorPanel.customHeaderBackgroundColor = UI.COOL_BLUE_COLOR;
+        // editorPanel.setTitle(UI.SAND_CLOCK_ICON, 'Editor');
+        // const clearSelectionButton = new UI.Button('Clear Selection');
+        // clearSelectionButton.onmousedown = () => {
+        //     this.selectedMesh = null;
+        // };
+        // editorPanel.contents.appendChild(clearSelectionButton.elem);
+        // const clearDebugRaysButton = new UI.Button('Clear Debug Rays');
+        // clearDebugRaysButton.onmousedown = () => {
+        //     this.debugRays = [];
+        // };
+        // editorPanel.contents.appendChild(clearDebugRaysButton.elem);
+        // panels.push(editorPanel);
+
+        const ui = ((window.main.ui) as UI.UI);
+        const editorPanel = new EditorPanel(ui, ((window.main.viewer) as Viewer.Viewer));
+        ui.toplevel.appendChild(editorPanel.elem); // todo need to check it's added just once
+        // panels.push(editorPanel);
+
         // const layersPanel = new UI.LayerPanel();
         // layersPanel.setLayers(this.meshRenderers);
         // panels.push(layersPanel);
@@ -510,10 +730,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         this.renderHelper.destroy(device);
     }
 
-    //
-    // GrabListener
-    //
-    public onGrab(e: MouseEvent): void {
+    private calculateRay(e: MouseEvent) {
         // Reference: https://antongerdelan.net/opengl/raycasting.html
 
         // Viewport (2D) -> NDC (3D)
@@ -541,51 +758,166 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
         const rayPos = mat4.getTranslation(vec3.create(), this.viewerInput.camera.worldMatrix);
 
-        const ray = { pos: rayPos, dir: rayWorld };
+        const ray = new Ray(rayPos, rayWorld);
         this.debugRays.push(ray);
+        return ray;
+    }
 
-        let hitSphere = (sphere: Sphere, ray: Ray) => {
-            // Reference: https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-sphere-intersection
-            const l = vec3.subtract(vec3.create(), sphere.center, ray.pos);
-            const tca = vec3.dot(l, ray.dir);
+    private static hitSphere(sphere: Sphere, ray: Ray): boolean {
+        // Reference: https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-sphere-intersection
+        const l = vec3.subtract(vec3.create(), sphere.center, ray.pos);
+        const tca = vec3.dot(l, ray.dir);
 
-            const d2 = vec3.dot(l, l) - tca * tca;
-            const radius2 = sphere.radius * sphere.radius;
-            if (d2 > radius2)
-                return false;
+        const d2 = vec3.dot(l, l) - tca * tca;
+        const radius2 = sphere.radius * sphere.radius;
+        if (d2 > radius2)
+            return false;
 
-            const thc = Math.sqrt(radius2 - d2);
-            let t0 = tca - thc;
-            let t1 = tca + thc;
+        const thc = Math.sqrt(radius2 - d2);
+        let t0 = tca - thc;
+        let t1 = tca + thc;
 
-            if (t0 > t1)
-                [t0, t1] = [t1, t0];
+        if (t0 > t1)
+            [t0, t1] = [t1, t0];
 
-            if (t0 < 0) {
-                t0 = t1; // if t0 is negative, let's use t1 instead
-                if (t0 < 0)
-                    return false; // both t0 and t1 are negative
+        if (t0 < 0) {
+            t0 = t1; // if t0 is negative, let's use t1 instead
+            if (t0 < 0)
+                return false; // both t0 and t1 are negative
+        }
+
+        return true;
+    }
+
+    private calculateMeshAABB(mesh: Mesh, meshIndex: number): void {
+        let meshAABB = new AABB();
+
+        for (let renderer of mesh.renderers) {
+            const aabb = renderer.aabbs[meshIndex];
+            meshAABB.union(meshAABB, aabb);
+        }
+
+        mesh.aabb = meshAABB;
+    }
+
+    public transformSelectedMesh(m: mat4): void {
+        if (this.selectedMesh) {
+            for (let renderer of this.selectedMesh.renderers) {
+                const instanceMatrix = renderer.meshInstanceMatrices[this.selectedMeshInstanceIndex]
+                mat4.multiply(instanceMatrix, instanceMatrix, m);
+
+                renderer.calculateAABBs();
             }
 
-            return true;
-        };
-
-        // console.log(`ray: ${vec3Str(ray.pos)}  ${vec3Str(ray.dir)}`);
-        for (let meshRenderer of this.meshRenderers) {
-            for (let i = 0; i < meshRenderer.aabbSpheres.length; ++i) {
-                const meshAABBSphere = meshRenderer.aabbSpheres[i];
-
-                // console.log(` sphere r ${meshAABBSphere.radius}  ${vec3Str(meshAABBSphere.center)}`);
-                if (hitSphere(meshAABBSphere, ray))
-                    meshRenderer.aabbs[i].active = true;
-            }
+            this.calculateMeshAABB(this.selectedMesh, this.selectedMeshInstanceIndex);
         }
     }
+
+    public translateSelectedMesh(v: vec3): void {
+        this.transformSelectedMesh(mat4.fromTranslation(mat4.create(), v));
+    }
+
+    //
+    // GrabListener
+    //
+    public onGrab(e: MouseEvent): void {
+        const ray = this.calculateRay(e);
+        // console.log(`ray: ${vec3Str(ray.pos)}  ${vec3Str(ray.dir)}`);
+        let minDist = Infinity;
+        let hasAHit = false;
+        let hitAABB: EditorAABB;
+        let hitMeshRenderer: Sly2MeshRenderer;
+        let hitMeshRendererIndex: number;
+
+        // Following code assumes meshRenderer.aabbs.length == meshRenderer.meshInstances.length
+
+        for (let meshRenderer of this.meshRenderers) {
+            assert(meshRenderer.aabbs.length == meshRenderer.meshInstanceMatrices.length);
+
+            for (let i = 0; i < meshRenderer.aabbs.length; ++i) {
+                const aabb = meshRenderer.aabbs[i];
+                if (aabb.isHuge)
+                    continue;
+                /*
+                const aabbSphere = aabb.sphere;
+                // console.log(` sphere r ${aabbSphere.radius}  ${vec3Str(aabbSphere.center)}`);
+                if (Sly2Renderer.hitSphere(aabbSphere, ray)) {
+                    const dist = vec3.distance(ray.pos, aabbSphere.center);
+                */
+                if (ray.intersectAABB(aabb)) {
+                    const dist = vec3.distance(ray.pos, aabb.centerPoint(vec3.create()));
+
+                    if (dist < minDist) {
+                        hitAABB = aabb;
+                        hitMeshRenderer = meshRenderer;
+                        hitMeshRendererIndex = i;
+                        minDist = dist;
+                        hasAHit = true;
+                    }
+                }
+
+            }
+        }
+
+        if (hasAHit) {
+            // hitAABB!.isDrawn = true;
+
+            const mesh = hitMeshRenderer!.mesh;
+            this.selectedMesh = mesh;
+            this.selectedMeshInstanceIndex = hitMeshRendererIndex!;
+            this.calculateMeshAABB(mesh, this.selectedMeshInstanceIndex);
+            this.selectedMesh.dirtyInstIndices.add(hitMeshRendererIndex!);
+        }
+        // todo mark & draw upper obj inst
+    }
     public onMotion(dx: number, dy: number): void {
-        // console.log(dx, dy);
+        if (this.selectedMesh) {
+            // const aabb = this.selectedMesh.aabb!;
+
+            // const aabbCenter = aabb.centerPoint(vec3.create());
+            // const aabbExtents = aabb.extents(vec3.create());
+            // // const basisScale = Math.min(Math.min(aabbExtents[0], aabbExtents[1], aabbExtents[2]));
+            // const basisMat = mat4.fromRotationTranslationScale(mat4.create(), quat.create(), aabbCenter, aabbExtents);
+
+            const translateVec = vec3.fromValues(dx, -dy, 0);
+            this.translateSelectedMesh(translateVec);
+        }
     }
     public onGrabReleased(): void {
-        // console.log('grab released');
+        console.log('grab released');
+    }
+
+    // Baking
+
+    public getChangedMatrices(): Array<[number, mat4]> {
+        let changeList: Array<[number, mat4]> = [];
+
+        for (let object of this.objects) {
+            for (let meshContainer of object.meshContainers) {
+                for (let mesh of meshContainer.meshes) {
+                    for (let dirtyInstIndex of mesh.dirtyInstIndices) {
+                        const addr = mesh.instanceAddresses[dirtyInstIndex];
+                        const mat = mesh.instances[dirtyInstIndex];
+                        changeList.push([addr, mat]);
+                    }
+                }
+            }
+        }
+
+        return changeList;
+    }
+
+    public bake() {
+        const levelDataCopy = this.levelData.copyToBuffer();
+        let s = new DataStream(new ArrayBufferSlice(levelDataCopy));
+
+        const changedMatrices = this.getChangedMatrices();
+        for (let changedMat of changedMatrices) {
+            s.offs = changedMat[0];
+            s.overwriteMat4(changedMat[1]);
+        }
+
+        downloadBuffer(this.levelFileName, levelDataCopy);
     }
 }
 
@@ -708,10 +1040,24 @@ const DRAW_ALL_AABBS = false;
 const worldRotX = mat4.fromXRotation(mat4.create(), 3 * 90 * MathConstants.DEG_TO_RAD);
 
 export class EditorAABB extends AABB {
-    active = false;
+    constructor(
+        minX: number = Infinity,
+        minY: number = Infinity,
+        minZ: number = Infinity,
+        maxX: number = -Infinity,
+        maxY: number = -Infinity,
+        maxZ: number = -Infinity,
+        public isDrawn = false, // TODO: remove?
+        public isHuge = false
+    ) {
+        super(minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    public clone(): EditorAABB {
+        return new EditorAABB(this.minX, this.minY, this.minZ, this.maxX, this.maxY, this.maxZ, this.isDrawn, this.isHuge);
+    }
 }
 
-// TODO add spheres to EditorAABB
 // TODO
 
 export class Sly2MeshRenderer {
@@ -729,21 +1075,23 @@ export class Sly2MeshRenderer {
         this.visible = v;
     }
 
-    private instanceMatrices: mat4[] = [];
-
+    public aabbOrigin: EditorAABB;
     public aabbs: EditorAABB[] = [];
-    public aabbSpheres: Sphere[] = [];
     public aabbColor: Color;
-    public aabbIsHuge = false;
 
-    public drawAABB = false;
+    public drawAABBs = false;
 
     constructor(
         textureData: (TextureData | null)[],
         public geometryData: GeometryData,
         public meshChunk: MeshChunk,
         private isFullyOpaque: boolean,
-        meshInstanceMatrices: mat4[]) {
+
+        public meshInstanceMatrices: mat4[],
+
+        public mesh: Mesh,
+        public meshCont: MeshContainer,
+        public levelObject: LevelObject) {
 
         this.name = meshChunk.name;
 
@@ -769,29 +1117,32 @@ export class Sly2MeshRenderer {
             blendDstFactor: GfxBlendFactor.ONE_MINUS_SRC_ALPHA,
         });
 
-        for (let meshInstanceMatrix of meshInstanceMatrices)
-            this.instanceMatrices.push(meshInstanceMatrix)
+        this.aabbOrigin = new EditorAABB();
+        this.aabbOrigin.setFromPointsFloatArray(meshChunk.positions);
 
-        for (let meshInstanceMatrix of meshInstanceMatrices) {
-            let aabb = new EditorAABB();
-            aabb.setFromPointsFloatArray(meshChunk.positions);
+        this.calculateAABBs();
+    }
+
+    public calculateAABBs(): void {
+        this.aabbs = [];
+
+        for (let meshInstanceMatrix of this.meshInstanceMatrices) {
+            let aabb = this.aabbOrigin.clone();
+
             mat4.copy(modelViewMatScratch2, worldRotX);
             mat4.mul(modelViewMatScratch2, modelViewMatScratch2, meshInstanceMatrix);
             aabb.transform(aabb, modelViewMatScratch2);
+
             this.aabbs.push(aabb);
 
-            let center = vec3.create();
-            aabb.centerPoint(center);
-            let radius = aabb.boundingSphereRadius();
-            this.aabbSpheres.push({ center, radius });
+            const extent = aabb.extents(vec3.create());
+            aabb.isHuge = vec3.length(extent) > 10000;
         }
 
         const firstExtent = this.aabbs[0].extents(vec3.create());
         const pseudoRandomFloat = (vec3.length(firstExtent)) % 1;
         let randomColor = colorFromHSL(colorNewFromRGBA(0, 0, 0), pseudoRandomFloat, 0.5, 0.5, 0.3);
         this.aabbColor = randomColor;
-
-        this.aabbIsHuge = vec3.length(firstExtent) > 10000;
     }
 
     public prepareToRender(renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput) {
@@ -830,7 +1181,7 @@ export class Sly2MeshRenderer {
 
         // TODO: instanced rendering
 
-        for (let instanceMatrix of this.instanceMatrices) {
+        for (let instanceMatrix of this.meshInstanceMatrices) {
             const renderInstInstance = renderInstManager.newRenderInst();
 
             let offs = renderInstInstance.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 4 /* + 2*/);
@@ -854,10 +1205,10 @@ export class Sly2MeshRenderer {
                 break;
         }
 
-        if (!this.isSkybox && !this.aabbIsHuge) {
-            for (let aabb of this.aabbs)
-                if (DRAW_ALL_AABBS || aabb.active)
-                    drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, aabb, mat4.create(), this.aabbColor);
+        for (let aabb of this.aabbs) {
+            if ((DRAW_ALL_AABBS || aabb.isDrawn || this.drawAABBs) && !aabb.isHuge) {
+                drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, aabb, mat4.create(), this.aabbColor);
+            }
         }
 
         renderInstManager.popTemplateRenderInst();

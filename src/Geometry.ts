@@ -50,7 +50,16 @@ export class AABB {
         public maxX: number = -Infinity,
         public maxY: number = -Infinity,
         public maxZ: number = -Infinity,
-    ) {}
+    ) { }
+
+    public translate(v: ReadonlyVec3): void {
+        this.minX += v[0];
+        this.maxX += v[0];
+        this.minY += v[1];
+        this.maxY += v[1];
+        this.minZ += v[2];
+        this.maxZ += v[2];
+    }
 
     public transform(src: AABB, m: ReadonlyMat4): void {
         // Transforming Axis-Aligned Bounding Boxes from Graphics Gems.

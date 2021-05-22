@@ -87,7 +87,8 @@ export default class InputManager {
         });
         this.toplevel.addEventListener('wheel', this._onWheel, { passive: false });
         this.toplevel.addEventListener('mousedown', (e) => {
-            if (!this.isInteractive) {
+            // if (!this.isInteractive) {
+            if (e.button == 1) { // TODD: rename nonInteractiveListener to something else
                 if (this.nonInteractiveListener)
                     GlobalGrabManager.takeGrab(this.nonInteractiveListener, e, { takePointerLock: false, useGrabbingCursor: true, releaseOnMouseUp: true });
                 return;
