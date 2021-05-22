@@ -11,11 +11,12 @@ import { downloadCanvasAsPng, downloadText } from "../DownloadUtils";
 import { range, range_end, transformVec3Mat4w1 } from '../MathHelpers';
 import { downloadBuffer } from '../DownloadUtils';
 import { makeZipFile, ZipFileEntry } from '../ZipFile';
-import { Sly2Renderer } from './Sly2Renderer';
+import { Sly2MeshRenderer, Sly2Renderer } from './Sly2Renderer';
 import { Texture } from './SlyData';
 import { DataStream } from "./DataStream";
 import { sprintf } from "./sprintf";
 import { Accessor, Document, WebIO, Node as GLTFNode, Mesh as GLTFMesh, Material as GLTFMaterial } from '@gltf-transform/core';
+import { AABB } from '../Geometry';
 
 
 // TODO: move shit to other files
@@ -204,7 +205,19 @@ export class Mesh {
     public instanceCount: number;
     public instances: mat4[] = [];
 
+    // for Editor
+
+
     public containerInstanceMatrixIndex: number;
+
+    public renderers: Sly2MeshRenderer[] = [];
+
+    public aabb: (AABB | null) = null;
+
+    public dirtyInstIndices: Set<number> = new Set();
+    public instanceAddresses: number[] = [];
+
+    //
 
     constructor(s: DataStream, public readonly container: MeshContainer, public meshIndex: number, i0: number) {
         this.offset = s.offs;
@@ -388,6 +401,7 @@ export class Mesh {
 
                 s.skip(2);
 
+                this.instanceAddresses.push(s.offs);
                 let instanceMat = s.mat4();
                 this.instances.push(instanceMat);
 
@@ -635,9 +649,12 @@ export class DynamicObjectInstance {
     public objId0: number;
     public matrix: mat4;
 
+    public matrixAddress: number;
+
     constructor(s: DataStream) {
         this.objId0 = s.u32();
         s.skip(1 + 2);
+        this.matrixAddress = s.offs;
         this.matrix = s.mat4();
     }
 }

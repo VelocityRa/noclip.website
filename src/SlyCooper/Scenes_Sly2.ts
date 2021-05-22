@@ -104,7 +104,9 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
         // TODO? Use compressed original files (orig. or zip/etc), or decompressed trimmed files
 
-        const bin = await context.dataFetcher.fetchData(`${pathBase}/${this.id}.slyZ.dec`)
+        const fileName = `${this.id}.slyZ.dec`;
+        const filePath = `${pathBase}/${fileName}`;
+        const bin = await context.dataFetcher.fetchData(filePath);
         let s = new DataStream(bin);
 
         console.log(`loaded ${pathBase}/${this.id} of size ${bin.byteLength}`);
@@ -912,7 +914,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
             // await addTexturesAndMaterials(object, object.texturesUnk);
         }
 
-        const renderer = new Sly2Renderer(device, objects, dynObjectInsts, texIdToTex);
+        const renderer = new Sly2Renderer(device, objects, dynObjectInsts, texIdToTex, fileName, bin);
         return renderer;
     }
 }

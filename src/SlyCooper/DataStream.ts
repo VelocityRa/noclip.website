@@ -1,6 +1,8 @@
 import ArrayBufferSlice from '../ArrayBufferSlice';
 import { vec2, vec3, vec4, mat3, mat4 } from "gl-matrix";
 
+// Assumes last column in 4x4 matrices is not stored and is [0, 0, 0, 1]
+
 export class DataStream {
     constructor(
         public buffer: ArrayBufferSlice,
@@ -60,6 +62,18 @@ export class DataStream {
 
     public align(alignment: number) { this.offs += (-this.offs) & (alignment - 1); }
     public skip(size: number) { this.offs += size; }
+
+    public overwriteFloat32(v: number): void {
+        this.view.setFloat32(this.offs, v);
+        this.offs += 4;
+    }
+
+    public overwriteMat4(m: mat4): void {
+        this.overwriteFloat32(m[0]); this.overwriteFloat32(m[1]); this.overwriteFloat32(m[2]);
+        this.overwriteFloat32(m[4]); this.overwriteFloat32(m[5]); this.overwriteFloat32(m[6]);
+        this.overwriteFloat32(m[8]); this.overwriteFloat32(m[9]); this.overwriteFloat32(m[10]);
+        this.overwriteFloat32(m[12]); this.overwriteFloat32(m[13]); this.overwriteFloat32(m[14]);
+    }
 
     // Shorthands
 
