@@ -225,6 +225,9 @@ export class Mesh {
 
     public occlSpherePosAddr = 0;
 
+    // TODO: hack. use either this or a matrix
+    public accumulatedTranslation = vec3.create();
+
     //
 
     constructor(s: DataStream, public readonly container: MeshContainer, public meshIndex: number, i0: number) {

@@ -299,7 +299,7 @@ class EditorPanel extends FloatingPanel {
         this.contents.appendChild(this.translateAxisRadioButtons.elem);
 
         this.contents.insertAdjacentHTML('beforeend', `
-        <button id="duplicateBtn" class="EditorButton">Bake</button>
+        <button id="duplicateBtn" class="EditorButton">Duplicate</button>
         <button id="bakeBtn" class="EditorButton">Bake</button>
         `);
 
@@ -391,10 +391,13 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                     let currentMeshRenderers: Sly2MeshRenderer[] = [];
 
                     let meshInstanceMatrices = [mat4.create()];
+                    mesh.instancesAll = [mat4.create()];
                     mesh.instanceAddressesAll.push(0);
 
-                    for (let meshInstance of mesh.instances)
+                    for (let meshInstance of mesh.instances) {
                         meshInstanceMatrices.push(mat4.clone(meshInstance));
+                        mesh.instancesAll.push(mat4.clone(meshInstance));
+                    }
                     for (let meshInstanceAddress of mesh.instanceAddresses) {
                         mesh.instanceAddressesAll.push(meshInstanceAddress);
                     }
@@ -405,11 +408,13 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                         if (object.header.id0 == dynObjInst.objId0) {
                             dynObjMats.push(dynObjInst.matrix);
                             // mesh.instanceAddressesAll.push(dynObjInst.matrixAddress);
-                            mesh.instanceAddressesAll.push(0);
+                            mesh.instanceAddressesAll.push(1);
                         }
                     }
-                    for (let dynObjMat of dynObjMats)
+                    for (let dynObjMat of dynObjMats) {
                         meshInstanceMatrices.push(mat4.clone(dynObjMat));
+                        mesh.instancesAll.push(mat4.create()); // TODO: this doesn't go through C2 xform
+                    }
 
                     if (mesh.u0 == 0) {
                         let transformC2 = meshContainer.meshC2Entries[mesh.containerInstanceMatrixIndex].transformMatrix;
@@ -420,7 +425,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                         }
                     }
 
-                    mesh.instancesAll = meshInstanceMatrices;
+                    // mesh.instancesAll = meshInstanceMatrices;
 
                     let chunkIdx = 0;
                     for (let meshChunk of mesh.chunks) {
@@ -869,6 +874,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
             // hitAABB!.isDrawn = true;
 
             const mesh = hitMeshRenderer!.mesh;
+
             this.selectedMesh = mesh;
             this.selectedMeshInstanceIndex = hitMeshRendererIndex!;
             this.calculateMeshAABB(mesh, this.selectedMeshInstanceIndex);
@@ -885,6 +891,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
             // // const basisScale = Math.min(Math.min(aabbExtents[0], aabbExtents[1], aabbExtents[2]));
             // const basisMat = mat4.fromRotationTranslationScale(mat4.create(), quat.create(), aabbCenter, aabbExtents);
 
+
             let translateVec: vec3;
             if (this.translateMode == 0)
                 translateVec = vec3.fromValues(dx, -dy, 0);
@@ -892,6 +899,9 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                 translateVec = vec3.fromValues(dx, 0, -dy);
             else
                 translateVec = vec3.fromValues(0, dx, -dy);
+
+            vec3.add(this.selectedMesh.accumulatedTranslation, this.selectedMesh.accumulatedTranslation, translateVec);
+
             this.translateSelectedMesh(translateVec);
         }
     }
@@ -921,8 +931,13 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                         if (mesh.occlSpherePosAddr) {
                             s.offs = mesh.occlSpherePosAddr;
                             let v = s.readVec3();
-                            const translation = mat4.getTranslation(vec3.create(), mat);
-                            vec3.add(v, v, translation);
+                            if (addr == 1) {
+                                vec3.add(v, v, mesh.accumulatedTranslation);
+                            } else {
+                                const translation = mat4.getTranslation(vec3.create(), mat);
+                                vec3.add(v, v, translation);
+                            }
+                            s.offs -= 3 * 4;
                             s.overwriteVec3(v);
                         }
 
@@ -936,7 +951,24 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
                                 for (let i = 0; i < mesh.vertexCounts[j]; ++i) {
                                     let v = s.readVec3();
-                                    vec3.transformMat4(v, v, mat);;
+                                    vec3.transformMat4(v, v, mat);
+                                    s.offs -= 3 * 4;
+                                    s.overwriteVec3(v);
+                                    s.skip(0x24 - 0xC);
+                                }
+                            }
+                        } else if (addr == 1) {
+                            // debugger;
+                            // Not instanced, so change vertex data itself
+
+                            console.log('addr==1, vtxDataAddrs:', mesh.vertexDataAddrs, 'counts', mesh.vertexCounts, 'add vec', mesh.accumulatedTranslation);
+                            for (let j = 0; j < mesh.vertexDataAddrs.length; j++) {
+                                s.offs = mesh.vertexDataAddrs[j];
+
+                                for (let i = 0; i < mesh.vertexCounts[j]; ++i) {
+                                    let v = s.readVec3();
+                                    vec3.add(v, v, mesh.accumulatedTranslation);
+                                    // vec3.transformMat4(v, v, mat);
                                     s.offs -= 3 * 4;
                                     s.overwriteVec3(v);
                                     s.skip(0x24 - 0xC);
