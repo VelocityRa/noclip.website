@@ -900,13 +900,14 @@ class Sly2LevelSceneDesc implements SceneDesc {
 
         const addTexturesAndMaterials = async (object: LevelObject, textures: (Texture | null)[]) => {
             await Promise.all(textures.filter((texture) => texture !== null).map(async (texture) => {
-                const surface = texture!.toCanvas().surfaces[0];
-                const blob: (Blob | null) = await new Promise((resolve, reject) => {
-                    surface.toBlob((blob: Blob | null) => blob !== null ? resolve(blob) : reject(null));
-                });
-                if (blob) {
-                    texIdToTex.set(`${object.header.index}_${texture!.texEntryIdx}`, texture!);
-                }
+                // const surface = texture!.toCanvas().surfaces[0];
+                // const blob: (Blob | null) = await new Promise((resolve, reject) => {
+                //     surface.toBlob((blob: Blob | null) => blob !== null ? resolve(blob) : reject(null));
+                // });
+                // if (blob) {
+                //     texIdToTex.set(`${object.header.index}_${texture!.texEntryIdx}`, texture!);
+                // }
+                texIdToTex.set(`${object.header.index}_${texture!.texEntryIdx}`, texture!);
             }));
         };
         for (let object of objects) {

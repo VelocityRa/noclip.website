@@ -64,10 +64,12 @@ export class DataStream {
     public skip(size: number) { this.offs += size; }
 
     public overwriteFloat32(v: number): void {
-        this.view.setFloat32(this.offs, v);
+        this.view.setFloat32(this.offs, v, true);
         this.offs += 4;
     }
-
+    public overwriteVec3(v: vec3): void {
+        this.overwriteFloat32(v[0]); this.overwriteFloat32(v[1]); this.overwriteFloat32(v[2]);
+    }
     public overwriteMat4(m: mat4): void {
         this.overwriteFloat32(m[0]); this.overwriteFloat32(m[1]); this.overwriteFloat32(m[2]);
         this.overwriteFloat32(m[4]); this.overwriteFloat32(m[5]); this.overwriteFloat32(m[6]);

@@ -217,6 +217,14 @@ export class Mesh {
     public dirtyInstIndices: Set<number> = new Set();
     public instanceAddresses: number[] = [];
 
+    public instancesAll: mat4[] = [];
+    public instanceAddressesAll: number[] = [];
+
+    public vertexDataAddrs: number[] = [];
+    public vertexCounts: number[] = [];
+
+    public occlSpherePosAddr = 0;
+
     //
 
     constructor(s: DataStream, public readonly container: MeshContainer, public meshIndex: number, i0: number) {
@@ -235,7 +243,8 @@ export class Mesh {
             s.skip(1 + 1);
 
             if (i0 == 0) {
-                const u9 = s.vec3();
+                this.occlSpherePosAddr = s.offs;
+                const occlSpherePos = s.vec3();
                 const u10 = s.f32();
                 const u11 = s.u32();
                 const u12 = s.f32();
@@ -280,6 +289,8 @@ export class Mesh {
                     const vertexDataOffset = s.u32();
                     const indexHeaderOffset = s.u32();
 
+                    this.vertexCounts.push(vertexCount);
+
                     const vertexDataSize = indexHeaderOffset - vertexDataOffset;
 
                     s.offs = startOffs + vertexDataOffset;
@@ -292,6 +303,7 @@ export class Mesh {
                     let vertexColor = new Uint32Array(vertexCount);
                     let vertexColorFloats = new Float32Array(vertexCount * 4);
 
+                    this.vertexDataAddrs.push(s.offs);
                     for (let i = 0; i < vertexCount; ++i) {
                         positions[i * 3 + 0] = s.f32();
                         positions[i * 3 + 1] = s.f32();
