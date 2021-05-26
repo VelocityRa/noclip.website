@@ -658,6 +658,8 @@ export class LevelObject {
     public textureContainer: TextureContainer;
     public texturesDiffuse: Texture[] = [];
     public texturesUnk: Texture[] = [];
+
+    public editorDynObjMatrices: Map<number, mat4> = new Map();
 }
 
 export class DynamicObjectInstance {
