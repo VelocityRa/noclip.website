@@ -257,6 +257,7 @@ class EditorPanel extends FloatingPanel {
     private translateAxisRadioButtons: UI.RadioButtons;
     private duplicateBtn: HTMLElement;
     private bakeBtn: HTMLElement;
+    private selectedObjectDiv: HTMLInputElement;
 
     // TODO: no ondrag... just radiobuttons for Plane select
     // after selection, to prevent drag
@@ -299,8 +300,11 @@ class EditorPanel extends FloatingPanel {
         this.contents.appendChild(this.translateAxisRadioButtons.elem);
 
         this.contents.insertAdjacentHTML('beforeend', `
+        <hr>
+        <b>Selected Object:</b> <div id="selectedObjectDiv"></div>
         <button id="duplicateBtn" class="EditorButton">Duplicate</button>
-        <button id="bakeBtn" class="EditorButton">Bake</button>
+        <hr>
+        <button id="bakeBtn" class="EditorButton">Bake Level</button>
         `);
 
         /*
@@ -317,6 +321,7 @@ class EditorPanel extends FloatingPanel {
         this.contents.style.lineHeight = '36px';
         this.duplicateBtn = this.contents.querySelector('#duplicateBtn') as HTMLInputElement;
         this.bakeBtn = this.contents.querySelector('#bakeBtn') as HTMLInputElement;
+        this.selectedObjectDiv = this.contents.querySelector('#selectedObjectDiv') as HTMLInputElement;
 
         // A listener to give focus to the canvas whenever it's clicked, even if the panel is still up.
         const keepFocus = function (e: MouseEvent) {
@@ -335,6 +340,19 @@ class EditorPanel extends FloatingPanel {
 
         // this.elem.style.display = 'none';
     }
+
+    public setSelectedObject(selectedObject: LevelObject, dynIdx: number) {
+        if (selectedObject)
+            this.selectedObjectDiv.innerHTML = `[${selectedObject.header.index}] [${dynIdx}] ${selectedObject.header.name}`;
+        else
+            this.selectedObjectDiv.innerHTML = 'None';
+    }
+}
+
+enum MeshInstanceType {
+    Identity,
+    MeshInstance,
+    DynObj,
 }
 
 export class Sly2Renderer implements Viewer.SceneGfx {
@@ -348,6 +366,8 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
     // Editor stuff
 
+    private editorPanel: EditorPanel;
+
     public nonInteractiveListener: GrabListener = this;
 
     private viewerInput: Viewer.ViewerRenderInput;
@@ -355,10 +375,20 @@ export class Sly2Renderer implements Viewer.SceneGfx {
     private debugRays: Ray[] = [];
     private debugLines: Line[] = [];
 
+    private selectSeparateMeshes = false;
+
+    private selectedObject: (LevelObject | null) = null;
+    public selectedObjectDynObjIndex = -1;
+    private selectedObjectRenderers: Sly2MeshRenderer[] = [];
+    private selectedObjectRendererMeshIndices: number[] = [];
+    private selectedObjectAABB: AABB;
+
     private selectedMesh: (Mesh | null) = null;
     private selectedMeshInstanceIndex: number;
 
     public translateMode = 0;
+
+    private meshRenderersDuplicates: Sly2MeshRenderer[] = [];
 
     //
 
@@ -369,7 +399,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
     constructor(
         device: GfxDevice,
         private objects: LevelObject[],
-        dynObjInsts: DynamicObjectInstance[],
+        private dynObjInsts: DynamicObjectInstance[],
         texIdToTex: Map<string, Texture>,
         private levelFileName: string,
         private levelData: NamedArrayBufferSlice
@@ -393,10 +423,12 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                     let meshInstanceMatrices = [mat4.create()];
                     mesh.instancesAll = [mat4.create()];
                     mesh.instanceAddressesAll.push(0);
+                    let meshInstanceTypes: MeshInstanceType[] = [MeshInstanceType.Identity];
 
                     for (let meshInstance of mesh.instances) {
                         meshInstanceMatrices.push(mat4.clone(meshInstance));
                         mesh.instancesAll.push(mat4.clone(meshInstance));
+                        meshInstanceTypes.push(MeshInstanceType.MeshInstance);
                     }
                     for (let meshInstanceAddress of mesh.instanceAddresses) {
                         mesh.instanceAddressesAll.push(meshInstanceAddress);
@@ -407,23 +439,31 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                     for (let dynObjInst of dynObjInsts) {
                         if (object.header.id0 == dynObjInst.objId0) {
                             dynObjMats.push(dynObjInst.matrix);
-                            // mesh.instanceAddressesAll.push(dynObjInst.matrixAddress);
-                            mesh.instanceAddressesAll.push(1);
+                            if (this.selectSeparateMeshes)
+                                mesh.instanceAddressesAll.push(1);
+                            else
+                                mesh.instanceAddressesAll.push(dynObjInst.matrixAddress);
                         }
                     }
                     for (let dynObjMat of dynObjMats) {
                         meshInstanceMatrices.push(mat4.clone(dynObjMat));
-                        mesh.instancesAll.push(mat4.create()); // TODO: this doesn't go through C2 xform
+                        mesh.instancesAll.push(mat4.create()); // TODO?: this doesn't go through C2 xform
+                        meshInstanceTypes.push(MeshInstanceType.DynObj);
                     }
 
+                    let meshInstanceMatrices1: mat4[] = [];
                     if (mesh.u0 == 0) {
                         let transformC2 = meshContainer.meshC2Entries[mesh.containerInstanceMatrixIndex].transformMatrix;
                         if (transformC2) {
                             for (let i = 0; i < meshInstanceMatrices.length; ++i) {
-                                mat4.multiply(meshInstanceMatrices[i], meshInstanceMatrices[i], transformC2!);
+                                // mat4.multiply(meshInstanceMatrices[i], meshInstanceMatrices[i], transformC2!);
+                                meshInstanceMatrices1.push(transformC2!);
                             }
                         }
                     }
+                    if (meshInstanceMatrices1.length == 0)
+                        for (let i = 0; i < meshInstanceMatrices1.length; ++i)
+                            meshInstanceMatrices1.push(mat4.create());
 
                     // mesh.instancesAll = meshInstanceMatrices;
 
@@ -450,7 +490,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                                 }
                             }
 
-                            currentMeshRenderers.push(new Sly2MeshRenderer(textureData, geometryData, meshChunk, isFullyOpaque, meshInstanceMatrices, mesh, meshContainer, object));
+                            currentMeshRenderers.push(new Sly2MeshRenderer(textureData, geometryData, meshChunk, isFullyOpaque, meshInstanceMatrices, meshInstanceMatrices1, meshInstanceTypes, mesh, meshContainer, object));
                         }
                         chunkIdx++;
                     }
@@ -480,6 +520,9 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         for (let meshRenderer of this.meshRenderers) {
             meshRenderer.prepareToRender(renderInstManager, viewerInput);
         }
+        // for (let meshRenderer of this.meshRenderersDuplicates) {
+        //     meshRenderer.prepareToRender(renderInstManager, viewerInput);
+        // }
         // for (let meshRenderer of this.meshRenderersReverse) {
         //     meshRenderer.prepareToRender(renderInstManager, viewerInput);
         // }
@@ -600,21 +643,34 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
         // drawWorldSpaceBasis(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, mat4.create(), 10000, 1);
 
-        if (this.selectedMesh) {
-            const aabb = this.selectedMesh.aabb!;
-            drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, aabb, mat4.create(), White, 3);
+        if (this.selectSeparateMeshes) {
+            if (this.selectedMesh) {
+                const aabb = this.selectedMesh.aabb!;
+                drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, aabb, mat4.create(), White, 3);
 
-            const aabbCenter = aabb.centerPoint(vec3.create());
-            const aabbExtents = aabb.extents(vec3.create());
-            // const basisScale = Math.min(Math.min(aabbExtents[0], aabbExtents[1], aabbExtents[2]));
-            const basisMat = mat4.fromRotationTranslationScale(mat4.create(), quat.create(), aabbCenter, aabbExtents);
+                const aabbCenter = aabb.centerPoint(vec3.create());
+                const aabbExtents = aabb.extents(vec3.create());
+                // const basisScale = Math.min(Math.min(aabbExtents[0], aabbExtents[1], aabbExtents[2]));
+                const basisMat = mat4.fromRotationTranslationScale(mat4.create(), quat.create(), aabbCenter, aabbExtents);
 
-            drawWorldSpaceBasis(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, basisMat, 1, 4);
+                drawWorldSpaceBasis(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, basisMat, 1, 4);
 
-            for (let renderer of this.selectedMesh.renderers) {
-                // for (let aabb of renderer.aabbs)
-                const aabb = renderer.aabbs[this.selectedMeshInstanceIndex];
-                drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, aabb, mat4.create(), renderer.aabbColor, 1);
+                for (let renderer of this.selectedMesh.renderers) {
+                    // for (let aabb of renderer.aabbs)
+                    const aabb = renderer.aabbs[this.selectedMeshInstanceIndex];
+                    drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, aabb, mat4.create(), renderer.aabbColor, 1);
+                }
+            }
+        } else {
+            if (this.selectedObject) {
+                drawWorldSpaceAABB(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, this.selectedObjectAABB, mat4.create(), White, 3);
+
+                const aabbCenter = this.selectedObjectAABB.centerPoint(vec3.create());
+                const aabbExtents = this.selectedObjectAABB.extents(vec3.create());
+                // const basisScale = Math.min(Math.min(aabbExtents[0], aabbExtents[1], aabbExtents[2]));
+                const basisMat = mat4.fromRotationTranslationScale(mat4.create(), quat.create(), aabbCenter, aabbExtents);
+
+                drawWorldSpaceBasis(getDebugOverlayCanvas2D(), viewerInput.camera.clipFromWorldMatrix, basisMat, 1, 4);
             }
         }
     }
@@ -708,8 +764,8 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         // panels.push(editorPanel);
 
         const ui = ((window.main.ui) as UI.UI);
-        const editorPanel = new EditorPanel(ui, ((window.main.viewer) as Viewer.Viewer));
-        ui.toplevel.appendChild(editorPanel.elem); // todo need to check it's added just once
+        this.editorPanel = new EditorPanel(ui, ((window.main.viewer) as Viewer.Viewer));
+        ui.toplevel.appendChild(this.editorPanel.elem); // todo need to check it's added just once
         // panels.push(editorPanel);
 
         // const layersPanel = new UI.LayerPanel();
@@ -793,34 +849,41 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         mesh.aabb = meshAABB;
     }
 
+    // private calculateObjectAABB(object: LevelObject,) {
+    // }
+
     public transformSelectedMesh(m: mat4): void {
+        // TODO: Fix
+
         if (this.selectedMesh) {
-            for (let renderer of this.selectedMesh.renderers) {
-                const instanceMatrix = renderer.meshInstanceMatrices[this.selectedMeshInstanceIndex]
-                mat4.multiply(instanceMatrix, instanceMatrix, m);
+            // for (let renderer of this.selectedMesh.renderers) {
+            //     const instanceMatrix = renderer.meshInstanceMatrices[this.selectedMeshInstanceIndex]
+            //     mat4.multiply(instanceMatrix, instanceMatrix, m);
 
-                renderer.calculateAABBs();
-            }
+            //     renderer.calculateAABBs();
+            // }
 
-            this.calculateMeshAABB(this.selectedMesh, this.selectedMeshInstanceIndex);
+            // this.calculateMeshAABB(this.selectedMesh, this.selectedMeshInstanceIndex);
         }
     }
 
     public translateSelectedMesh(v: vec3): void {
         // this.transformSelectedMesh(mat4.fromTranslation(mat4.create(), v));
 
+        // TODO: Fix
+
         if (this.selectedMesh) {
-            for (let renderer of this.selectedMesh.renderers) {
-                const instanceMatrix = renderer.meshInstanceMatrices[this.selectedMeshInstanceIndex]
-                const origScale = mat4.getScaling(vec3.create(), instanceMatrix);
+            // for (let renderer of this.selectedMesh.renderers) {
+            //     const instanceMatrix = renderer.meshInstanceMatrices[this.selectedMeshInstanceIndex]
+            //     const origScale = mat4.getScaling(vec3.create(), instanceMatrix);
 
-                vec3.div(v, v, origScale);
-                mat4.translate(instanceMatrix, instanceMatrix, v);
+            //     vec3.div(v, v, origScale);
+            //     mat4.translate(instanceMatrix, instanceMatrix, v);
 
-                renderer.calculateAABBs();
-            }
+            //     renderer.calculateAABBs();
+            // }
 
-            this.calculateMeshAABB(this.selectedMesh, this.selectedMeshInstanceIndex);
+            // this.calculateMeshAABB(this.selectedMesh, this.selectedMeshInstanceIndex);
         }
     }
 
@@ -843,7 +906,11 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         // Following code assumes meshRenderer.aabbs.length == meshRenderer.meshInstances.length
 
         for (let meshRenderer of this.meshRenderers) {
-            assert(meshRenderer.aabbs.length == meshRenderer.meshInstanceMatrices.length);
+            if (meshRenderer.object.header.name == 'f_nightclub_exterior' ||
+                meshRenderer.object.header.name == 'f_nightclub_exterior_rig')
+                continue;
+
+            assert(meshRenderer.aabbs.length == meshRenderer.meshInstanceMatrices0.length);
 
             for (let i = 0; i < meshRenderer.aabbs.length; ++i) {
                 const aabb = meshRenderer.aabbs[i];
@@ -875,34 +942,132 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
             const mesh = hitMeshRenderer!.mesh;
 
-            this.selectedMesh = mesh;
-            this.selectedMeshInstanceIndex = hitMeshRendererIndex!;
-            this.calculateMeshAABB(mesh, this.selectedMeshInstanceIndex);
-            this.selectedMesh.dirtyInstIndices.add(hitMeshRendererIndex!);
+            if (this.selectSeparateMeshes) {
+                this.selectedMesh = mesh;
+                this.selectedMeshInstanceIndex = hitMeshRendererIndex!;
+                this.calculateMeshAABB(mesh, this.selectedMeshInstanceIndex);
+                this.selectedMesh.dirtyInstIndices.add(hitMeshRendererIndex!);
+            } else {
+                this.selectedObject = hitMeshRenderer!.object;
+
+                const meshInstanceTypes = hitMeshRenderer!.meshInstanceTypes;
+                let hitInstType = meshInstanceTypes[hitMeshRendererIndex!];
+
+                if (hitInstType == MeshInstanceType.DynObj) {
+                    let dynObjCount = 0;
+                    for (let i = 0; i < hitMeshRendererIndex!; ++i) {
+                        if (meshInstanceTypes[i] == MeshInstanceType.DynObj) {
+                            dynObjCount++;
+                        }
+                    }
+                    this.selectedObjectDynObjIndex = dynObjCount;
+
+
+                    this.editorPanel.setSelectedObject(this.selectedObject, this.selectedObjectDynObjIndex);
+
+                    // TODO? index is not always right ?
+
+                    this.selectedObjectAABB = new AABB();
+
+                    this.selectedObjectRenderers = [];
+                    this.selectedObjectRendererMeshIndices = [];
+                    for (let meshCont of this.selectedObject.meshContainers) {
+                        for (let mesh of meshCont.meshes) {
+                            for (let renderer of mesh.renderers) {
+                                // for (let aabb of renderer.aabbs)
+                                if (this.selectedObjectDynObjIndex == -1) {
+                                    // const aabb = renderer.aabbs[this.selectedMeshInstanceIndex];
+                                    // objectAABB.union(objectAABB, aabb);
+                                } else {
+                                    let dynInstCount = 0;
+                                    for (let instTypeIndex = 0; renderer.meshInstanceTypes.length; instTypeIndex++) {
+                                        const type = renderer.meshInstanceTypes[instTypeIndex];
+
+                                        if (type == MeshInstanceType.DynObj) {
+                                            if (dynInstCount == this.selectedObjectDynObjIndex) {
+                                                this.selectedObjectRenderers.push(renderer);
+                                                this.selectedObjectRendererMeshIndices.push(instTypeIndex);
+                                                const aabb = renderer.aabbs[instTypeIndex];
+                                                this.selectedObjectAABB.union(this.selectedObjectAABB, aabb);
+                                                // debugger;
+                                                break;
+                                            }
+                                            dynInstCount++;
+                                        }
+                                    }
+
+                                    // if (this.selectedObject.editorDynObjMatrices.length == 0)
+                                    //     for (let i = 0; i < dynInstCount + 1; i++)
+                                    //         this.selectedObject.editorDynObjMatrices.push(mat4.create());
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    this.selectedObjectDynObjIndex = -1;
+                    console.log(`non dynobj instance selected: ${this.selectedObject.header.name}`);
+                    // TODO
+                    this.selectedObject = null;
+                }
+            }
         }
         // todo mark & draw upper obj inst
     }
     public onMotion(dx: number, dy: number): void {
+        // const aabb = this.selectedMesh.aabb!;
+
+        // const aabbCenter = aabb.centerPoint(vec3.create());
+        // const aabbExtents = aabb.extents(vec3.create());
+        // // const basisScale = Math.min(Math.min(aabbExtents[0], aabbExtents[1], aabbExtents[2]));
+        // const basisMat = mat4.fromRotationTranslationScale(mat4.create(), quat.create(), aabbCenter, aabbExtents);
+
+        // const getTRS = (m: mat4) => {
+        //     return { t: mat4.getTranslation(vec3.create(), m), r: mat4.getRotation(quat.create(), m), s: mat4.getScaling(vec3.create(), m) };
+        // };
+        // const fromTRS = (t: vec3, r: quat, s: vec3) => {
+        //     return mat4.fromRotationTranslationScale(mat4.create(), r, t, s);
+        // }
+
+        let translateVec: vec3;
+        if (this.translateMode == 0)
+            translateVec = vec3.fromValues(dx, -dy, 0);
+        else if (this.translateMode == 1)
+            translateVec = vec3.fromValues(dx, 0, -dy);
+        else
+            translateVec = vec3.fromValues(0, dx, -dy);
+
         if (this.selectedMesh) {
-            // const aabb = this.selectedMesh.aabb!;
-
-            // const aabbCenter = aabb.centerPoint(vec3.create());
-            // const aabbExtents = aabb.extents(vec3.create());
-            // // const basisScale = Math.min(Math.min(aabbExtents[0], aabbExtents[1], aabbExtents[2]));
-            // const basisMat = mat4.fromRotationTranslationScale(mat4.create(), quat.create(), aabbCenter, aabbExtents);
-
-
-            let translateVec: vec3;
-            if (this.translateMode == 0)
-                translateVec = vec3.fromValues(dx, -dy, 0);
-            else if (this.translateMode == 1)
-                translateVec = vec3.fromValues(dx, 0, -dy);
-            else
-                translateVec = vec3.fromValues(0, dx, -dy);
-
             vec3.add(this.selectedMesh.accumulatedTranslation, this.selectedMesh.accumulatedTranslation, translateVec);
 
             this.translateSelectedMesh(translateVec);
+        } else {
+            this.selectedObjectAABB.reset();
+
+            for (let i = 0; i < this.selectedObjectRenderers.length; ++i) {
+                const renderer = this.selectedObjectRenderers[i];
+
+                const meshIdx = this.selectedObjectRendererMeshIndices[i];
+                // let instanceMat = renderer.meshInstanceMatrices1[meshIdx];
+                // console.log(i, instanceMat);
+
+                // let trs = getTRS(instanceMat);
+                // vec3.add(trs.t, trs.t, translateVec);
+                // let mat = fromTRS(trs.t, trs.r, trs.s);
+                // mat4.copy(instanceMat, mat);
+
+                // mat4.translate(instanceMat, instanceMat, translateVec);
+
+                let editorMat = renderer.levelEditorMatrices[meshIdx];
+                mat4.translate(editorMat, editorMat, translateVec);
+
+                // vec3.divide(translateVec, translateVec, vec3.fromValues(10, 10, 10));
+                // this.selectedObjectAABB.translate(translateVec);
+
+                renderer.calculateAABBs();
+
+                const aabb = renderer.aabbs[meshIdx];
+                this.selectedObjectAABB.union(this.selectedObjectAABB, aabb);
+            }
         }
     }
     public onGrabReleased(): void {
@@ -917,72 +1082,78 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
         console.log('bake');
 
-        for (let object of this.objects) {
-            for (let meshContainer of object.meshContainers) {
-                for (let mesh of meshContainer.meshes) {
-                    for (let dirtyInstIndex of mesh.dirtyInstIndices) {
-                        const addr = mesh.instanceAddressesAll[dirtyInstIndex];
-                        const mat = mesh.instancesAll[dirtyInstIndex];
+        if (this.selectSeparateMeshes) {
+            for (let object of this.objects) {
+                for (let meshContainer of object.meshContainers) {
+                    for (let mesh of meshContainer.meshes) {
+                        for (let dirtyInstIndex of mesh.dirtyInstIndices) {
+                            const addr = mesh.instanceAddressesAll[dirtyInstIndex];
+                            const mat = mesh.instancesAll[dirtyInstIndex];
 
-                        console.log('obj', object.header.name, 'cont', hexzero0x(meshContainer.offset),
-                            'mesh', hexzero0x(mesh.offset), 'dirtyInstIndex', dirtyInstIndex, 'of', mesh.dirtyInstIndices.size,
-                            'addr', hexzero0x(addr), 'mat', mat);
+                            console.log('obj', object.header.name, 'cont', hexzero0x(meshContainer.offset),
+                                'mesh', hexzero0x(mesh.offset), 'dirtyInstIndex', dirtyInstIndex, 'of', mesh.dirtyInstIndices.size,
+                                'addr', hexzero0x(addr), 'mat', mat);
 
-                        if (mesh.occlSpherePosAddr) {
-                            s.offs = mesh.occlSpherePosAddr;
-                            let v = s.readVec3();
-                            if (addr == 1) {
-                                vec3.add(v, v, mesh.accumulatedTranslation);
-                            } else {
-                                const translation = mat4.getTranslation(vec3.create(), mat);
-                                vec3.add(v, v, translation);
-                            }
-                            s.offs -= 3 * 4;
-                            s.overwriteVec3(v);
-                        }
-
-                        if (addr == 0) {
-                            // debugger;
-                            // Not instanced, so change vertex data itself
-
-                            console.log('addr==0, vtxDataAddrs:', mesh.vertexDataAddrs);
-                            for (let j = 0; j < mesh.vertexDataAddrs.length; j++) {
-                                s.offs = mesh.vertexDataAddrs[j];
-
-                                for (let i = 0; i < mesh.vertexCounts[j]; ++i) {
-                                    let v = s.readVec3();
-                                    vec3.transformMat4(v, v, mat);
-                                    s.offs -= 3 * 4;
-                                    s.overwriteVec3(v);
-                                    s.skip(0x24 - 0xC);
-                                }
-                            }
-                        } else if (addr == 1) {
-                            // debugger;
-                            // Not instanced, so change vertex data itself
-
-                            console.log('addr==1, vtxDataAddrs:', mesh.vertexDataAddrs, 'counts', mesh.vertexCounts, 'add vec', mesh.accumulatedTranslation);
-                            for (let j = 0; j < mesh.vertexDataAddrs.length; j++) {
-                                s.offs = mesh.vertexDataAddrs[j];
-
-                                for (let i = 0; i < mesh.vertexCounts[j]; ++i) {
-                                    let v = s.readVec3();
+                            if (mesh.occlSpherePosAddr) {
+                                s.offs = mesh.occlSpherePosAddr;
+                                let v = s.readVec3();
+                                if (addr == 1) {
                                     vec3.add(v, v, mesh.accumulatedTranslation);
-                                    // vec3.transformMat4(v, v, mat);
-                                    s.offs -= 3 * 4;
-                                    s.overwriteVec3(v);
-                                    s.skip(0x24 - 0xC);
+                                } else {
+                                    const translation = mat4.getTranslation(vec3.create(), mat);
+                                    vec3.add(v, v, translation);
                                 }
+                                s.offs -= 3 * 4;
+                                s.overwriteVec3(v);
                             }
-                        } else {
-                            s.offs = addr;
-                            s.overwriteMat4(mat);
+
+                            if (addr == 0) {
+                                // debugger;
+                                // Not instanced, so change vertex data itself
+
+                                console.log('addr==0, vtxDataAddrs:', mesh.vertexDataAddrs);
+                                for (let j = 0; j < mesh.vertexDataAddrs.length; j++) {
+                                    s.offs = mesh.vertexDataAddrs[j];
+
+                                    for (let i = 0; i < mesh.vertexCounts[j]; ++i) {
+                                        let v = s.readVec3();
+                                        vec3.transformMat4(v, v, mat);
+                                        s.offs -= 3 * 4;
+                                        s.overwriteVec3(v);
+                                        s.skip(0x24 - 0xC);
+                                    }
+                                }
+                            } else if (addr == 1) {
+                                // debugger;
+                                // Not instanced, so change vertex data itself
+
+                                console.log('addr==1, vtxDataAddrs:', mesh.vertexDataAddrs, 'counts', mesh.vertexCounts, 'add vec', mesh.accumulatedTranslation);
+                                for (let j = 0; j < mesh.vertexDataAddrs.length; j++) {
+                                    s.offs = mesh.vertexDataAddrs[j];
+
+                                    for (let i = 0; i < mesh.vertexCounts[j]; ++i) {
+                                        let v = s.readVec3();
+                                        vec3.add(v, v, mesh.accumulatedTranslation);
+                                        // vec3.transformMat4(v, v, mat);
+                                        s.offs -= 3 * 4;
+                                        s.overwriteVec3(v);
+                                        s.skip(0x24 - 0xC);
+                                    }
+                                }
+                            } else {
+                                s.offs = addr;
+                                s.overwriteMat4(mat);
+                            }
                         }
                     }
                 }
             }
-        }
+        } else {
+            for (let object of this.objects) {
+                const mats = object.editorDynObjMatrices;
 
+            }
+        }
         downloadBuffer(this.levelFileName, levelDataCopy);
     }
 }
@@ -1147,17 +1318,21 @@ export class Sly2MeshRenderer {
 
     public drawAABBs = false;
 
+    public levelEditorMatrices: mat4[] = [];
+
     constructor(
         textureData: (TextureData | null)[],
         public geometryData: GeometryData,
         public meshChunk: MeshChunk,
         private isFullyOpaque: boolean,
 
-        public meshInstanceMatrices: mat4[],
+        public meshInstanceMatrices0: mat4[],
+        public meshInstanceMatrices1: mat4[],
+        public meshInstanceTypes: MeshInstanceType[],
 
         public mesh: Mesh,
         public meshCont: MeshContainer,
-        public levelObject: LevelObject) {
+        public object: LevelObject) {
 
         this.name = meshChunk.name;
 
@@ -1186,13 +1361,30 @@ export class Sly2MeshRenderer {
         this.aabbOrigin = new EditorAABB();
         this.aabbOrigin.setFromPointsFloatArray(meshChunk.positions);
 
+        for (let i = 0; i < meshInstanceMatrices0.length; i++)
+            this.levelEditorMatrices.push(mat4.create());
+
         this.calculateAABBs();
+    }
+
+    private getMatrixIndex(idx: number): mat4 {
+        return mat4.mul(
+            mat4.create(),
+            this.levelEditorMatrices[idx],
+            mat4.mul(
+                mat4.create(),
+                this.meshInstanceMatrices0[idx],
+                this.meshInstanceMatrices1[idx]
+            )
+        );
     }
 
     public calculateAABBs(): void {
         this.aabbs = [];
 
-        for (let meshInstanceMatrix of this.meshInstanceMatrices) {
+        // for (let meshInstanceMatrix of this.meshInstanceMatrices) {
+        for (let i = 0; i < this.meshInstanceMatrices0.length; ++i) {
+            let meshInstanceMatrix = this.getMatrixIndex(i);
             let aabb = this.aabbOrigin.clone();
 
             mat4.copy(modelViewMatScratch2, worldRotX);
@@ -1247,7 +1439,8 @@ export class Sly2MeshRenderer {
 
         // TODO: instanced rendering
 
-        for (let instanceMatrix of this.meshInstanceMatrices) {
+        for (let i = 0; i < this.meshInstanceMatrices0.length; ++i) {
+            // const instanceMatrix = this.meshInstanceMatrices[i];
             const renderInstInstance = renderInstManager.newRenderInst();
 
             let offs = renderInstInstance.allocateUniformBuffer(SlyProgram.ub_ShapeParams, 4 * 4 /* + 2*/);
@@ -1256,7 +1449,10 @@ export class Sly2MeshRenderer {
             mat4.copy(modelViewMatScratch, viewMatScratch);
 
             mat4.mul(modelViewMatScratch, modelViewMatScratch, worldRotX);
-            mat4.mul(modelViewMatScratch, modelViewMatScratch, instanceMatrix);
+            mat4.mul(modelViewMatScratch, modelViewMatScratch, this.getMatrixIndex(i));
+            // mat4.mul(modelViewMatScratch, modelViewMatScratch, this.levelEditorMatrices[i]);
+            // mat4.mul(modelViewMatScratch, modelViewMatScratch, this.meshInstanceMatrices0[i]);
+            // mat4.mul(modelViewMatScratch, modelViewMatScratch, this.meshInstanceMatrices1[i]);
 
             if (this.isSkybox)
                 mat4.scale(modelViewMatScratch, modelViewMatScratch, [2, 2, 2]);
