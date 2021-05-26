@@ -390,6 +390,8 @@ export class Sly2Renderer implements Viewer.SceneGfx {
 
     private meshRenderersDuplicates: Sly2MeshRenderer[] = [];
 
+    private editorDynObjAddrTransforms: Map<number, mat4> = new Map();
+
     //
 
     private createShader(device: GfxDevice) {
@@ -978,6 +980,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                                 if (this.selectedObjectDynObjIndex == -1) {
                                     // const aabb = renderer.aabbs[this.selectedMeshInstanceIndex];
                                     // objectAABB.union(objectAABB, aabb);
+                                    // return;
                                 } else {
                                     let dynInstCount = 0;
                                     for (let instTypeIndex = 0; renderer.meshInstanceTypes.length; instTypeIndex++) {
@@ -995,10 +998,6 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                                             dynInstCount++;
                                         }
                                     }
-
-                                    // if (this.selectedObject.editorDynObjMatrices.length == 0)
-                                    //     for (let i = 0; i < dynInstCount + 1; i++)
-                                    //         this.selectedObject.editorDynObjMatrices.push(mat4.create());
                                 }
                             }
                         }
@@ -1068,6 +1067,24 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                 const aabb = renderer.aabbs[meshIdx];
                 this.selectedObjectAABB.union(this.selectedObjectAABB, aabb);
             }
+
+            // TODO: This is slow!
+            let dynObjs: DynamicObjectInstance[] = [];
+            for (let dynObjInst of this.dynObjInsts) {
+                if (this.selectedObject?.header.id0 == dynObjInst.objId0) {
+                    dynObjs.push(dynObjInst);
+                }
+            }
+
+            let dynObj = dynObjs[this.selectedObjectDynObjIndex];
+
+            let t = this.editorDynObjAddrTransforms.get(dynObj.matrixAddress);
+            if (!t) {
+                this.editorDynObjAddrTransforms.set(dynObj.matrixAddress, mat4.create());
+                t = this.editorDynObjAddrTransforms.get(dynObj.matrixAddress);
+            }
+
+            mat4.translate(t!, t!, translateVec);
         }
     }
     public onGrabReleased(): void {
@@ -1149,9 +1166,16 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                 }
             }
         } else {
-            for (let object of this.objects) {
-                const mats = object.editorDynObjMatrices;
+            console.log(this.editorDynObjAddrTransforms);
+            for (let transform of this.editorDynObjAddrTransforms) {
+                const addr = transform[0];
+                const transformMat = transform[1];
 
+                s.offs = addr;
+                let mat = s.readMat4();
+                mat4.mul(mat, mat, transformMat);
+                s.offs -= 4 * 4 * 3;
+                s.overwriteMat4(mat);
             }
         }
         downloadBuffer(this.levelFileName, levelDataCopy);
