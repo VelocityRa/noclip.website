@@ -254,7 +254,9 @@ function mat4Str(m: mat4) {
 let gSly2Renderer: Sly2Renderer;
 
 class EditorPanel extends FloatingPanel {
+    private transformToolRadioButtons: UI.RadioButtons;
     private translateAxisRadioButtons: UI.RadioButtons;
+    private gizmoSensitivitySlider: UI.Slider;
     private duplicateBtn: HTMLElement;
     private bakeBtn: HTMLElement;
     private selectedObjectDiv: HTMLInputElement;
@@ -289,15 +291,37 @@ class EditorPanel extends FloatingPanel {
                 cursor: pointer;
                 draggable: true;
             }
+            hr {
+                border-color: #BBBBBB;
+                margin: 10px 10px;
+            }
         </style>
         `);
 
+        this.transformToolRadioButtons = new UI.RadioButtons('Transform Tool', ['Translate', 'Rotate', 'Scale']);
+        this.transformToolRadioButtons.onselectedchange = () => {
+            gSly2Renderer.transformToolMode = this.transformToolRadioButtons.selectedIndex;
+        };
+        this.transformToolRadioButtons.setSelectedIndex(0);
+        this.contents.appendChild(this.transformToolRadioButtons.elem);
+
+        this.contents.insertAdjacentHTML('beforeend', `<hr>`);
+
         this.translateAxisRadioButtons = new UI.RadioButtons('Translate Axis', ['X/Z', 'X/Y', 'Y/Z']);
         this.translateAxisRadioButtons.onselectedchange = () => {
-            gSly2Renderer.translateMode = this.translateAxisRadioButtons.selectedIndex;
+            gSly2Renderer.translateAxisMode = this.translateAxisRadioButtons.selectedIndex;
         };
         this.translateAxisRadioButtons.setSelectedIndex(0);
         this.contents.appendChild(this.translateAxisRadioButtons.elem);
+
+        this.gizmoSensitivitySlider = new UI.Slider();
+        this.gizmoSensitivitySlider.setLabel('Translate Sensitivity');
+        this.gizmoSensitivitySlider.setRange(0.5, 10);
+        this.gizmoSensitivitySlider.onvalue = (v: number) => {
+            gSly2Renderer.gizmoSensitivity = v;
+        };
+        this.gizmoSensitivitySlider.setValue(gSly2Renderer.gizmoSensitivity);
+        this.contents.appendChild(this.gizmoSensitivitySlider.elem);
 
         this.contents.insertAdjacentHTML('beforeend', `
         <hr>
@@ -331,7 +355,7 @@ class EditorPanel extends FloatingPanel {
         document.addEventListener('mousedown', keepFocus);
 
         this.duplicateBtn.onclick = () => {
-            gSly2Renderer.duplicateSelectedMesh();
+            gSly2Renderer.duplicateSelectedObject();
         }
 
         this.bakeBtn.onclick = () => {
@@ -380,17 +404,20 @@ export class Sly2Renderer implements Viewer.SceneGfx {
     private selectedObject: (LevelObject | null) = null;
     public selectedObjectDynObjIndex = -1;
     private selectedObjectRenderers: Sly2MeshRenderer[] = [];
-    private selectedObjectRendererMeshIndices: number[] = [];
+    private selectedObjectRendererMeshInstIndices: number[] = [];
     private selectedObjectAABB: AABB;
 
     private selectedMesh: (Mesh | null) = null;
     private selectedMeshInstanceIndex: number;
 
-    public translateMode = 0;
+    public transformToolMode = 0;
+    public translateAxisMode = 0;
 
-    private meshRenderersDuplicates: Sly2MeshRenderer[] = [];
+    private meshRenderersDuplicated: Sly2MeshRenderer[] = [];
 
     private editorDynObjAddrTransforms: Map<number, mat4> = new Map();
+
+    public gizmoSensitivity = 5.0;
 
     //
 
@@ -492,7 +519,8 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                                 }
                             }
 
-                            currentMeshRenderers.push(new Sly2MeshRenderer(textureData, geometryData, meshChunk, isFullyOpaque, meshInstanceMatrices, meshInstanceMatrices1, meshInstanceTypes, mesh, meshContainer, object));
+                            currentMeshRenderers.push(new Sly2MeshRenderer(textureData, geometryData, meshChunk, isFullyOpaque, [...meshInstanceMatrices], [...meshInstanceMatrices1], [...meshInstanceTypes], mesh, meshContainer, object));
+
                         }
                         chunkIdx++;
                     }
@@ -522,7 +550,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         for (let meshRenderer of this.meshRenderers) {
             meshRenderer.prepareToRender(renderInstManager, viewerInput);
         }
-        // for (let meshRenderer of this.meshRenderersDuplicates) {
+        // for (let meshRenderer of this.meshRenderersDuplicated) {
         //     meshRenderer.prepareToRender(renderInstManager, viewerInput);
         // }
         // for (let meshRenderer of this.meshRenderersReverse) {
@@ -889,8 +917,16 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         }
     }
 
-    public duplicateSelectedMesh() {
+    public duplicateSelectedObject() {
+        if (this.selectedObject) {
+            for (let i = 0; i < this.selectedObjectRenderers.length; ++i) {
+                const renderer = this.selectedObjectRenderers[i];
+                const meshInstIdx = this.selectedObjectRendererMeshInstIndices[i];
 
+                renderer.addDuplicatedMatrix(meshInstIdx);
+                renderer.calculateAABBs();
+            }
+        }
     }
 
     //
@@ -972,7 +1008,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                     this.selectedObjectAABB = new AABB();
 
                     this.selectedObjectRenderers = [];
-                    this.selectedObjectRendererMeshIndices = [];
+                    this.selectedObjectRendererMeshInstIndices = [];
                     for (let meshCont of this.selectedObject.meshContainers) {
                         for (let mesh of meshCont.meshes) {
                             for (let renderer of mesh.renderers) {
@@ -989,7 +1025,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                                         if (type == MeshInstanceType.DynObj) {
                                             if (dynInstCount == this.selectedObjectDynObjIndex) {
                                                 this.selectedObjectRenderers.push(renderer);
-                                                this.selectedObjectRendererMeshIndices.push(instTypeIndex);
+                                                this.selectedObjectRendererMeshInstIndices.push(instTypeIndex);
                                                 const aabb = renderer.aabbs[instTypeIndex];
                                                 this.selectedObjectAABB.union(this.selectedObjectAABB, aabb);
                                                 // debugger;
@@ -1013,58 +1049,45 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         // todo mark & draw upper obj inst
     }
     public onMotion(dx: number, dy: number): void {
-        // const aabb = this.selectedMesh.aabb!;
-
-        // const aabbCenter = aabb.centerPoint(vec3.create());
-        // const aabbExtents = aabb.extents(vec3.create());
-        // // const basisScale = Math.min(Math.min(aabbExtents[0], aabbExtents[1], aabbExtents[2]));
-        // const basisMat = mat4.fromRotationTranslationScale(mat4.create(), quat.create(), aabbCenter, aabbExtents);
-
-        // const getTRS = (m: mat4) => {
-        //     return { t: mat4.getTranslation(vec3.create(), m), r: mat4.getRotation(quat.create(), m), s: mat4.getScaling(vec3.create(), m) };
-        // };
-        // const fromTRS = (t: vec3, r: quat, s: vec3) => {
-        //     return mat4.fromRotationTranslationScale(mat4.create(), r, t, s);
-        // }
-
-        let translateVec: vec3;
-        if (this.translateMode == 0)
-            translateVec = vec3.fromValues(dx, -dy, 0);
-        else if (this.translateMode == 1)
-            translateVec = vec3.fromValues(dx, 0, -dy);
-        else
-            translateVec = vec3.fromValues(0, dx, -dy);
-
         if (this.selectedMesh) {
-            vec3.add(this.selectedMesh.accumulatedTranslation, this.selectedMesh.accumulatedTranslation, translateVec);
-
-            this.translateSelectedMesh(translateVec);
+            // vec3.add(this.selectedMesh.accumulatedTranslation, this.selectedMesh.accumulatedTranslation, translateVec);
+            // this.translateSelectedMesh(translateVec);
         } else {
             this.selectedObjectAABB.reset();
+
+            if (this.transformToolMode == 0) {
+                dx *= this.gizmoSensitivity;
+                dy *= this.gizmoSensitivity;
+            }
+
+            let translateVec: vec3;
+            if (this.translateAxisMode == 0)
+                translateVec = vec3.fromValues(dx, -dy, 0);
+            else if (this.translateAxisMode == 1)
+                translateVec = vec3.fromValues(dx, 0, -dy);
+            else
+                translateVec = vec3.fromValues(0, dx, -dy);
 
             for (let i = 0; i < this.selectedObjectRenderers.length; ++i) {
                 const renderer = this.selectedObjectRenderers[i];
 
-                const meshIdx = this.selectedObjectRendererMeshIndices[i];
-                // let instanceMat = renderer.meshInstanceMatrices1[meshIdx];
-                // console.log(i, instanceMat);
+                const meshInstIdx = this.selectedObjectRendererMeshInstIndices[i];
 
-                // let trs = getTRS(instanceMat);
-                // vec3.add(trs.t, trs.t, translateVec);
-                // let mat = fromTRS(trs.t, trs.r, trs.s);
-                // mat4.copy(instanceMat, mat);
+                let editorMat = renderer.levelEditorMatrices[meshInstIdx];
 
-                // mat4.translate(instanceMat, instanceMat, translateVec);
-
-                let editorMat = renderer.levelEditorMatrices[meshIdx];
-                mat4.translate(editorMat, editorMat, translateVec);
-
-                // vec3.divide(translateVec, translateVec, vec3.fromValues(10, 10, 10));
-                // this.selectedObjectAABB.translate(translateVec);
+                if (this.transformToolMode == 0) {
+                    mat4.translate(editorMat, editorMat, translateVec);
+                } else if (this.transformToolMode == 1) {
+                    // TODO
+                    mat4.rotateX(editorMat, editorMat, dx / 100);
+                } else {
+                    // TODO
+                    mat4.scale(editorMat, editorMat, vec3.fromValues(1 + dx / 100, 1 + dx / 100, 1 + dx / 100));
+                }
 
                 renderer.calculateAABBs();
 
-                const aabb = renderer.aabbs[meshIdx];
+                const aabb = renderer.aabbs[meshInstIdx];
                 this.selectedObjectAABB.union(this.selectedObjectAABB, aabb);
             }
 
@@ -1084,7 +1107,7 @@ export class Sly2Renderer implements Viewer.SceneGfx {
                 t = this.editorDynObjAddrTransforms.get(dynObj.matrixAddress);
             }
 
-            mat4.translate(t!, t!, translateVec);
+            mat4.translate(t!, t!, translateVec!);
         }
     }
     public onGrabReleased(): void {
@@ -1345,7 +1368,7 @@ export class Sly2MeshRenderer {
     public levelEditorMatrices: mat4[] = [];
 
     constructor(
-        textureData: (TextureData | null)[],
+        private textureData: (TextureData | null)[],
         public geometryData: GeometryData,
         public meshChunk: MeshChunk,
         private isFullyOpaque: boolean,
@@ -1391,7 +1414,29 @@ export class Sly2MeshRenderer {
         this.calculateAABBs();
     }
 
-    private getMatrixIndex(idx: number): mat4 {
+    // public cloneDuplicate(): Sly2MeshRenderer {
+    //     let dup = new Sly2MeshRenderer(this.textureData, this.geometryData, this.meshChunk, this.isFullyOpaque,
+    //         this.meshInstanceMatrices0, this.meshInstanceMatrices1, this.meshInstanceTypes, this.mesh, this.meshCont, this.object);
+
+    //     for (let i = 0; i < this.levelEditorMatrices.length; ++i) {
+    //         // dup.levelEditorMatrices[i] = this.levelEditorMatrices[i];
+    //         mat4.translate(dup.levelEditorMatrices[i], dup.levelEditorMatrices[i], vec3.fromValues(0, 1000, 0));
+    //     }
+
+    //     return dup;
+    // }
+
+    public addDuplicatedMatrix(idx: number) {
+        this.meshInstanceMatrices0.push(mat4.copy(mat4.create(), this.meshInstanceMatrices0[idx]));
+        this.meshInstanceMatrices1.push(mat4.copy(mat4.create(), this.meshInstanceMatrices1[idx]));
+        this.levelEditorMatrices.push(mat4.copy(mat4.create(), this.levelEditorMatrices[idx]));
+        this.meshInstanceTypes.push(this.meshInstanceTypes[idx]);
+    }
+
+    private getMatrix(idx: number): mat4 {
+        // console.log('getMat', idx, this.levelEditorMatrices.length,this.meshInstanceMatrices0.length,this.meshInstanceMatrices1.length);
+        // assert(this.levelEditorMatrices.length == this.meshInstanceMatrices0.length);
+        // assert(this.meshInstanceMatrices0.length == this.meshInstanceMatrices1.length);
         return mat4.mul(
             mat4.create(),
             this.levelEditorMatrices[idx],
@@ -1408,7 +1453,7 @@ export class Sly2MeshRenderer {
 
         // for (let meshInstanceMatrix of this.meshInstanceMatrices) {
         for (let i = 0; i < this.meshInstanceMatrices0.length; ++i) {
-            let meshInstanceMatrix = this.getMatrixIndex(i);
+            let meshInstanceMatrix = this.getMatrix(i);
             let aabb = this.aabbOrigin.clone();
 
             mat4.copy(modelViewMatScratch2, worldRotX);
@@ -1473,7 +1518,7 @@ export class Sly2MeshRenderer {
             mat4.copy(modelViewMatScratch, viewMatScratch);
 
             mat4.mul(modelViewMatScratch, modelViewMatScratch, worldRotX);
-            mat4.mul(modelViewMatScratch, modelViewMatScratch, this.getMatrixIndex(i));
+            mat4.mul(modelViewMatScratch, modelViewMatScratch, this.getMatrix(i));
             // mat4.mul(modelViewMatScratch, modelViewMatScratch, this.levelEditorMatrices[i]);
             // mat4.mul(modelViewMatScratch, modelViewMatScratch, this.meshInstanceMatrices0[i]);
             // mat4.mul(modelViewMatScratch, modelViewMatScratch, this.meshInstanceMatrices1[i]);
