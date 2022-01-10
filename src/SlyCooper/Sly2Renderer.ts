@@ -31,6 +31,8 @@ import { DataStream } from './DataStream';
 import ArrayBufferSlice from '../ArrayBufferSlice';
 import { downloadBuffer } from '../DownloadUtils';
 
+export const ENABLE_EDITOR = false;
+
 class SlyRenderHacks {
     disableTextures = false;
     disableVertexColors = false;
@@ -793,10 +795,12 @@ export class Sly2Renderer implements Viewer.SceneGfx {
         // editorPanel.contents.appendChild(clearDebugRaysButton.elem);
         // panels.push(editorPanel);
 
-        const ui = ((window.main.ui) as UI.UI);
-        this.editorPanel = new EditorPanel(ui, ((window.main.viewer) as Viewer.Viewer));
-        ui.toplevel.appendChild(this.editorPanel.elem); // todo need to check it's added just once
-        // panels.push(editorPanel);
+        if (ENABLE_EDITOR) {
+            const ui = ((window.main.ui) as UI.UI);
+            this.editorPanel = new EditorPanel(ui, ((window.main.viewer) as Viewer.Viewer));
+            ui.toplevel.appendChild(this.editorPanel.elem); // todo need to check it's added just once
+            // panels.push(editorPanel);
+        }
 
         // const layersPanel = new UI.LayerPanel();
         // layersPanel.setLayers(this.meshRenderers);

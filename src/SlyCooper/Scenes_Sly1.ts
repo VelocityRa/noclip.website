@@ -187,7 +187,7 @@ class Sly1LevelSceneDesc implements SceneDesc {
         // }
 
         if (Settings.PARSE_MESHES) {
-            this.meshContainers = Data.parseMeshes(bin);
+            this.meshContainers = Data.parseMeshes(bin, this.id);
 
             console.log(`Mesh Container #: ${this.meshContainers.length}`);
 

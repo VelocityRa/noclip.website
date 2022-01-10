@@ -1,5 +1,5 @@
 import ArrayBufferSlice from '../ArrayBufferSlice';
-import { mat4, vec2, vec3, quat } from 'gl-matrix';
+import { mat4, vec2, vec3, quat, vec4 } from 'gl-matrix';
 import { SceneGroup, SceneDesc, SceneGfx, ViewerRenderInput } from "../viewer";
 import * as Viewer from "../viewer";
 import { GfxDevice } from "../gfx/platform/GfxPlatform";
@@ -16,8 +16,8 @@ import { DataStream } from "./DataStream";
 import { sprintf } from "./sprintf";
 import { Texture } from './SlyData';
 import { DynamicObjectInstance, LevelObject, parseObjectEntries, TextureContainer, MeshContainer } from './Sly2Data';
-import { Accessor, Document, WebIO, Node as GLTFNode, Mesh as GLTFMesh, Material as GLTFMaterial } from '@gltf-transform/core';
-
+// import { Accessor, Document, WebIO, Node as GLTFNode, Mesh as GLTFMesh, Material as GLTFMaterial, MathUtils } from '@gltf-transform/core';
+import { Accessor, Document, WebIO, Node as GLTFNode, Mesh as GLTFMesh, Material as GLTFMaterial, MathUtils, mat4 as GLTFTmat4, vec3 as GLTFTvec3, vec4 as GLTFTvec4} from '@gltf-transform/core';
 
 const pathBase = `Sly2`;
 
@@ -36,7 +36,7 @@ export const SCRIPTS_EXPORT = false;
 export const TEXTURES_EXPORT = false;
 
 export const MESH_EXPORT = false;
-export const MESH_EXPORT_MATERIALS = false;
+export const MESH_EXPORT_MATERIALS = true;
 
 export const MESH_EXPORT_GLTF_OLD = false;
 export const MESH_EXPORT_GLTF = false;
@@ -131,6 +131,14 @@ class Sly2LevelSceneDesc implements SceneDesc {
             s.offs = objectOffset;
 
             let textureSize = s.u32();
+
+            console.log(`texsize: ${hexzero(textureSize)}`);
+            // HACK
+            if (textureSize > 0x10000000) {
+                console.log('skipping');
+                continue;
+            }
+
             s.skip(4);
             let hasScripts = (s.u32() != 0);
 
@@ -162,6 +170,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
             object.header = objectEntry;
             object.offset = objectOffset;
 
+            let exitLoop = false;
             let objLog = `${leftPad(objectEntry.name, 32, ' ')} #${leftPad(`${objectEntry.count}`, 2)} | TEX `;
             let hasTex = false;
             while (textureIndex < this.textureDescOffsets.length) {
@@ -171,13 +180,25 @@ class Sly2LevelSceneDesc implements SceneDesc {
                     break;
 
                 s.offs = textureDescOffset;
-                object.textureContainer = new TextureContainer(s, textureSize);
+                console.log(`textureDescOffset: ${hexzero(textureDescOffset)}`);
+                try {
+                    object.textureContainer = new TextureContainer(s, textureSize);
+                } catch (error) {
+                    // :thisisfine:
+                    console.error(error);
+                    exitLoop = true;
+                }
+                if (exitLoop)
+                    break;
 
                 objLog += `${hexzero(textureDescOffset)}, `
                 hasTex = true;
 
                 ++textureIndex;
             }
+            if (exitLoop)
+                break;
+
             if (hasTex)
                 objLog = objLog.substring(0, objLog.length - 2);
 
@@ -543,6 +564,35 @@ class Sly2LevelSceneDesc implements SceneDesc {
                 quat.normalize(trs.r, trs.r);
                 node.setRotation([trs.r[0], trs.r[1], trs.r[2], trs.r[3]]);
                 node.setScale([trs.s[0], trs.s[1], trs.s[2]]);
+
+                /*
+                let t = vec3.create();
+                let r = vec4.create();
+                let s = vec3.create();
+
+                MathUtils.decompose(mat as GLTFTmat4, t as GLTFTvec3, r as GLTFTvec4, s as GLTFTvec3);
+
+                node.setTranslation(t as GLTFTvec3);
+                // quat.normalize(r, r);
+                node.setRotation(r as GLTFTvec4);
+                node.setScale(s as GLTFTvec3);
+                */
+
+                /*
+                let t :GLTFTvec3= [0,0,0];
+                let r :GLTFTvec4= [0,0,0,0];
+                let s :GLTFTvec3= [0,0,0];
+
+                MathUtils.decompose(mat as GLTFTmat4, t, r, s);
+
+                node.setTranslation(t);
+                quat.normalize(r as quat, r as quat);
+                node.setRotation(r);
+                node.setScale(s);
+                */
+
+                // console.log(mat, node.getMatrix());
+                // assert(mat4.equals(mat, node.getMatrix()));
             }
 
             const globalBuffer = doc.createBuffer();
@@ -653,6 +703,7 @@ class Sly2LevelSceneDesc implements SceneDesc {
                                 meshInstNode.setMesh(chunk.gltfMesh);
 
                                 let meshInstMatrixFinal = mat4.multiply(mat4.create(), rootMatrix, meshInstMatrix);
+                                // let meshInstMatrixFinal = meshInstMatrix;
                                 setNodeMatrix(meshInstNode, meshInstMatrixFinal);
                                 mainScene.addChild(meshInstNode);
 

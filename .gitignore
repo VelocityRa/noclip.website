@@ -66,5 +66,8 @@ deploy_rsa.pub
 *.psd
 
 rust/target/
+
 data/
 .pnpm-debug.log
+
+dist

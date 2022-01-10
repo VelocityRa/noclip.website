@@ -34,6 +34,10 @@
     "@sentry/browser": "^5.30.0",
     "crc-32": "^1.2.1",
     "gl-matrix": "^3.4.3",
+    "@gltf-transform/core": "^0.9.9",
+    "@sentry/browser": "^5.7.1",
+    "@types/webmidi": "^2.0.4",
+    "crc-32": "^1.2.0",
     "librw": "^0.4.0",
     "pako": "^1.0.11",
     "reflect-metadata": "^0.1.13"
