@@ -240,7 +240,7 @@ export enum MeshFlag {
     Coins = 1 << 7, // and glow part of treasure keys (?)
 }
 
-export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
+export function parseMeshes(buffer: ArrayBufferSlice, levelId: string): MeshContainer[] {
     const binView = buffer.createDataView();
     let stream = new DataStream(buffer, binView);
 
@@ -275,6 +275,9 @@ export function parseMeshes(buffer: ArrayBufferSlice): MeshContainer[] {
             let meshContainer = new MeshContainer(stream, meshIndex, meshContainers.length);
             meshIndex += meshContainer.meshes.length;
             meshContainers.push(meshContainer);
+
+            // if (levelId == "jb_intro" && meshContainers.length == 283)
+            //     break;
         }
     }
 
