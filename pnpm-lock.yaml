@@ -1,19 +1,20 @@
 lockfileVersion: 5.3
 
 specifiers:
-  '@sentry/browser': ^5.30.0
+  '@gltf-transform/core': ^0.9.9
+  '@sentry/browser': ^5.7.1
   '@types/filesystem': ^0.0.29
   '@types/node': ^11.15.54
   '@types/pako': ^1.0.3
   '@types/pngjs': ^3.4.2
   '@types/puppeteer': ^1.20.8
-  '@types/webmidi': ^2.0.6
+  '@types/webmidi': ^2.0.4
   '@wasm-tool/wasm-pack-plugin': ^1.6.0
   '@webgpu/types': ^0.1.13
   buffer: ^6.0.3
   clean-webpack-plugin: ^3.0.0
   copy-webpack-plugin: ^7.0.0
-  crc-32: ^1.2.1
+  crc-32: ^1.2.0
   fork-ts-checker-webpack-plugin: ^6.5.0
   git-revision-webpack-plugin: ^3.0.6
   gl-matrix: ^3.4.3
@@ -35,7 +36,9 @@ specifiers:
   webpack-merge: ^5.8.0
 
 dependencies:
+  '@gltf-transform/core': 0.9.11
   '@sentry/browser': 5.30.0
+  '@types/webmidi': 2.0.6
   crc-32: 1.2.1
   gl-matrix: 3.4.3
   librw: 0.4.0
@@ -48,7 +51,6 @@ devDependencies:
   '@types/pako': 1.0.3
   '@types/pngjs': 3.4.2
   '@types/puppeteer': 1.20.8
-  '@types/webmidi': 2.0.6
   '@wasm-tool/wasm-pack-plugin': 1.6.0
   '@webgpu/types': 0.1.13
   buffer: 6.0.3
@@ -109,6 +111,12 @@ packages:
     resolution: {integrity: sha512-ws57AidsDvREKrZKYffXddNkyaF14iHNHm8VQnZH6t99E8gczjNN0GpvcGny0imC80yQ0tHz1xVUKk/KFQSUyA==}
     engines: {node: '>=10.0.0'}
     dev: true
+
+  /@gltf-transform/core/0.9.11:
+    resolution: {integrity: sha512-HePuZVd5P/oEy56bShhMwyqczfaE0gLcnZwR56d5ABofe2GfZfKA4src5TI7xy619y7H9viJU52Xcqx5DFtxFA==}
+    dependencies:
+      gl-matrix: 3.4.3
+    dev: false
 
   /@nodelib/fs.scandir/2.1.5:
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
@@ -370,7 +378,7 @@ packages:
 
   /@types/webmidi/2.0.6:
     resolution: {integrity: sha512-sfS0A5IryqmBrUpcGPipEPeFdpqmZzP6b6lZFxHKgz5n2Vhzh4yJ5P2TvoDUhDjqJyv0Y25ng0Qodgo2Vu08ug==}
-    dev: true
+    dev: false
 
   /@types/webpack-sources/3.2.0:
     resolution: {integrity: sha512-Ft7YH3lEVRQ6ls8k4Ff1oB4jN6oy/XmU6tQISKdhfh+1mR+viZFphS6WL0IrtDOzvefmJg5a0s7ZQoRXwqTEFg==}

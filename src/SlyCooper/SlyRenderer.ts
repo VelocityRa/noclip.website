@@ -21,7 +21,8 @@ import { Color, Magenta, colorToCSS, Red, Green, Blue, Cyan } from "../Color";
 import { GfxBuffer, GfxInputLayout, GfxInputState, GfxBufferUsage, GfxVertexAttributeDescriptor, GfxFormat, GfxInputLayoutBufferDescriptor, GfxVertexBufferFrequency } from "../gfx/platform/GfxPlatform";
 import { makeStaticDataBuffer } from "../gfx/helpers/BufferHelpers";
 import { GfxRenderCache } from "../gfx/render/GfxRenderCache";
-import { GfxrAttachmentSlot, makeBackbufferDescSimple } from '../gfx/render/GfxRenderGraph';
+import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph';
+import { makeBackbufferDescSimple } from '../gfx/helpers/RenderGraphHelpers';
 
 class SlyRenderHacks {
     disableTextures = false;
@@ -267,7 +268,7 @@ export class SlyRenderer implements Viewer.SceneGfx {
 
         if (!this.program)
             this.createShader(device);
-        const gfxProgram = renderInstManager.gfxRenderCache.createProgramSimple(device, this.program!);
+        const gfxProgram = renderInstManager.gfxRenderCache.createProgramSimple(this.program!);
         template.setGfxProgram(gfxProgram);
 
         let offs = template.allocateUniformBuffer(SlyProgram.ub_SceneParams, 16 + 1);
@@ -284,7 +285,7 @@ export class SlyRenderer implements Viewer.SceneGfx {
 
         renderInstManager.popTemplateRenderInst();
 
-        this.renderHelper.prepareToRender(device);
+        this.renderHelper.prepareToRender();
     }
 
     public render(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput) {
@@ -301,14 +302,14 @@ export class SlyRenderer implements Viewer.SceneGfx {
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
             pass.attachRenderTargetID(GfxrAttachmentSlot.DepthStencil, mainDepthTargetID);
             pass.exec((passRenderer) => {
-                renderInstManager.drawOnPassRenderer(device, passRenderer);
+                renderInstManager.drawOnPassRenderer(passRenderer);
             });
         });
         pushAntialiasingPostProcessPass(builder, this.renderHelper, viewerInput, mainColorTargetID);
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput, renderInstManager);
-        this.renderHelper.renderGraph.execute(device, builder);
+        this.renderHelper.renderGraph.execute(builder);
         renderInstManager.resetRenderInsts();
 
         if (debugHacks.drawMeshOrigins || debugHacks.drawSzmsPositions || debugHacks.drawSzmePositions) {
@@ -488,7 +489,7 @@ export class SlyRenderer implements Viewer.SceneGfx {
     }
 
     public destroy(device: GfxDevice): void {
-        this.renderHelper.destroy(device);
+        this.renderHelper.destroy();
     }
 }
 
@@ -570,9 +571,9 @@ export class GeometryData {
     constructor(device: GfxDevice, cache: GfxRenderCache, meshChunk: Data.MeshChunk) {
         const indices = Uint16Array.from(meshChunk.trianglesIndices);
         this.indexCount = indices.length;
-        this.positionBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, meshChunk.positions.buffer);
-        this.normalBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, meshChunk.normals.buffer);
-        this.texcoordBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, meshChunk.texCoords.buffer);
+        this.positionBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, meshChunk.positions.buffer);
+        this.normalBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, meshChunk.normals.buffer);
+        this.texcoordBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, meshChunk.texCoords.buffer);
         // let lighting: Float32Array;
         // if (meshChunk.szme)
         //     lighting = meshChunk.szme.lightingFloats;
@@ -580,8 +581,8 @@ export class GeometryData {
         //     lighting = new Float32Array(meshChunk.positions.length * 4);
         // let lighting = new Float32Array(meshChunk.positions.length * 4);
         let vertexColor = meshChunk.vertexColorFloats;
-        this.vertexColorBuffer = makeStaticDataBuffer(device, GfxBufferUsage.VERTEX, vertexColor.buffer);
-        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.INDEX, meshChunk.trianglesIndices.buffer);
+        this.vertexColorBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Vertex, vertexColor.buffer);
+        this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, meshChunk.trianglesIndices.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: 0, bufferIndex: 0, format: GfxFormat.F32_RGB, bufferByteOffset: 0, }, // Position
@@ -590,12 +591,12 @@ export class GeometryData {
             { location: 3, bufferIndex: 3, format: GfxFormat.F32_RGBA, bufferByteOffset: 0, }, // VertexColor
         ];
         const vertexBufferDescriptors: GfxInputLayoutBufferDescriptor[] = [
-            { byteStride: 3 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
-            { byteStride: 3 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
-            { byteStride: 2 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
-            { byteStride: 4 * 0x04, frequency: GfxVertexBufferFrequency.PER_VERTEX, },
+            { byteStride: 3 * 0x04, frequency: GfxVertexBufferFrequency.PerVertex, },
+            { byteStride: 3 * 0x04, frequency: GfxVertexBufferFrequency.PerVertex, },
+            { byteStride: 2 * 0x04, frequency: GfxVertexBufferFrequency.PerVertex, },
+            { byteStride: 4 * 0x04, frequency: GfxVertexBufferFrequency.PerVertex, },
         ];
-        this.inputLayout = cache.createInputLayout(device, {
+        this.inputLayout = cache.createInputLayout({
             indexBufferFormat: GfxFormat.U16_R,
             vertexAttributeDescriptors,
             vertexBufferDescriptors,
@@ -631,16 +632,16 @@ class TextureData {
     }
 
     private makeGfxSampler(device: GfxDevice, gfxCache: GfxRenderCache): GfxSampler {
-        return gfxCache.createSampler(device, {
+        return gfxCache.createSampler({
             // wrapS: GfxWrapMode.CLAMP,
             // wrapT: GfxWrapMode.CLAMP,
-            wrapS: GfxWrapMode.REPEAT,
-            wrapT: GfxWrapMode.REPEAT,
+            wrapS: GfxWrapMode.Repeat,
+            wrapT: GfxWrapMode.Repeat,
             // minFilter: GfxTexFilterMode.POINT,
             // magFilter: GfxTexFilterMode.POINT,
-            minFilter: GfxTexFilterMode.BILINEAR,
-            magFilter: GfxTexFilterMode.BILINEAR,
-            mipFilter: GfxMipFilterMode.NO_MIP,
+            minFilter: GfxTexFilterMode.Bilinear,
+            magFilter: GfxTexFilterMode.Bilinear,
+            mipFilter: GfxMipFilterMode.NoMip,
             minLOD: 0, maxLOD: 0,
         });
     }
@@ -722,12 +723,12 @@ export class SlyMeshRenderer {
 
         this.megaStateFlags.frontFace = GfxFrontFaceMode.CW;
         // this.megaStateFlags.cullMode = GfxCullMode.BACK;
-        this.megaStateFlags.cullMode = GfxCullMode.NONE;
+        this.megaStateFlags.cullMode = GfxCullMode.None;
 
         setAttachmentStateSimple(this.megaStateFlags, {
-            blendMode: GfxBlendMode.ADD,
-            blendSrcFactor: GfxBlendFactor.SRC_ALPHA,
-            blendDstFactor: GfxBlendFactor.ONE_MINUS_SRC_ALPHA,
+            blendMode: GfxBlendMode.Add,
+            blendSrcFactor: GfxBlendFactor.SrcAlpha,
+            blendDstFactor: GfxBlendFactor.OneMinusSrcAlpha,
         });
 
         this.rotX = mat4.fromXRotation(this.rotX, 3 * 90 * MathConstants.DEG_TO_RAD);

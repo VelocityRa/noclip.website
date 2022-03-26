@@ -32,7 +32,7 @@ let enc = new TextEncoder();
 // TODO: instances for other objects
 
 // TODO: move elsewhere
-export const SCRIPTS_EXPORT = true;
+export const SCRIPTS_EXPORT = false;
 export const TEXTURES_EXPORT = false;
 
 export const MESH_EXPORT = false;

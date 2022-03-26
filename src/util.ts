@@ -96,7 +96,7 @@ export function spacePad(S: string, spaces: number) {
     return leftPad(S, spaces, ' ');
 }
 
-export function hexzero(n: number, spaces: number): string {
+export function hexzero(n: number, spaces: number = 8): string {
     let S = (n >>> 0).toString(16);
     return leftPad(S, spaces);
 }
