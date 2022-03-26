@@ -15,7 +15,7 @@ import { Sly2Renderer } from './Sly2Renderer';
 import { DataStream } from "./DataStream";
 import { sprintf } from "./sprintf";
 import { Texture } from './SlyData';
-import { DynamicObjectInstance, LevelObject, parseObjectEntries, TextureContainer, MeshContainer } from './Sly2Data';
+import { DynamicObjectInstance, LevelObject, parseObjectEntries, TextureContainer, MeshContainer, Mesh } from './Sly2Data';
 // import { Accessor, Document, WebIO, Node as GLTFNode, Mesh as GLTFMesh, Material as GLTFMaterial, MathUtils } from '@gltf-transform/core';
 import { Accessor, Document, WebIO, Node as GLTFNode, Mesh as GLTFMesh, Material as GLTFMaterial, MathUtils, mat4 as GLTFTmat4, vec3 as GLTFTvec3, vec4 as GLTFTvec4} from '@gltf-transform/core';
 
@@ -32,15 +32,16 @@ let enc = new TextEncoder();
 // TODO: instances for other objects
 
 // TODO: move elsewhere
-export const SCRIPTS_EXPORT = false;
+export const SCRIPTS_EXPORT = true;
 export const TEXTURES_EXPORT = false;
 
 export const MESH_EXPORT = false;
-export const MESH_EXPORT_MATERIALS = true;
+export const MESH_EXPORT_MATERIALS = false;
 
 export const MESH_EXPORT_GLTF_OLD = false;
 export const MESH_EXPORT_GLTF = false;
 export const MESH_EXPORT_GLTF_MATERIALS = false;
+export const MESH_EXPORT_SEPARATE_ONLY_INSTANCES = false;
 
 export const MESH_SEPARATE_TO_OBJECTS = true;
 export const MESH_SEPARATE_ONLY_OBJECTS = false;
@@ -514,7 +515,6 @@ class Sly2LevelSceneDesc implements SceneDesc {
             }
         }
 
-
         if (MESH_EXPORT_GLTF) {
             const io = new WebIO({ credentials: 'include' });
 
@@ -967,6 +967,171 @@ class Sly2LevelSceneDesc implements SceneDesc {
         }
 
         const renderer = new Sly2Renderer(device, objects, dynObjectInsts, texIdToTex, fileName, bin);
+
+
+        // THe renderer's constructor creates some stuff the following code uses, that's why it's here
+        // todo deduplicate
+        if (MESH_EXPORT_SEPARATE_ONLY_INSTANCES) {
+            let obj_str = "";
+            // obj_str += `mtllib ${this.id}.mtl\n`;
+
+            obj_str += `g all\n`;
+            obj_str += `s off\n`;
+
+            let face_idx_base = 1;
+
+            let chunkTotalIdx = 0;
+            for (let object of objects) {
+                // if (MESH_SEPARATE_TO_OBJECTS && MESH_SEPARATE_ONLY_OBJECTS)
+                //     obj_str += `o [${object.header.index}]${object.header.name}\n`;
+
+                // if (object.header.index != 280)
+                //     continue;
+
+                let objectAddresses = new Set<number>();
+
+                for (let meshContainer of object.meshContainers) {
+                    let meshIdx = 0;
+
+                    for (let mesh of meshContainer.meshes) {
+                        // if (MESH_SEPARATE_TO_OBJECTS && !MESH_SEPARATE_ONLY_OBJECTS && !MESH_SEPARATE_OBJECT_CHUNKS)
+                        //     obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero(mesh.offset)}\n`;
+
+                        let meshInstanceMatrixAddresses: number[] = [];
+                        let meshInstanceMatrices = [];
+                        // let meshInstanceMatrixAddresses: number[] = [0];
+                        // let meshInstanceMatrices = [mat4.create()];
+
+                        // let meshInstanceMatrices = [];
+
+                        let i = 0;
+                        for (let meshInstance of mesh.instances) {
+                            meshInstanceMatrices.push(mat4.clone(meshInstance));
+                            meshInstanceMatrixAddresses.push(mesh.instanceAddresses[i]);
+                            i++;
+                        }
+
+                        // TODO: This is slow!
+                        let dynObjects: mat4[] = [];
+                        for (let dynObjInst of dynObjectInsts) {
+                            if (object.header.id0 == dynObjInst.objId0) {
+                                dynObjects.push(dynObjInst.matrix);
+                                meshInstanceMatrixAddresses.push(dynObjInst.matrixAddress);
+                            }
+                        }
+                        for (let dynObjInstance of dynObjects)
+                            meshInstanceMatrices.push(mat4.clone(dynObjInstance));
+
+                        if (mesh.u0 == 0) {
+                            let transformC2 = meshContainer.meshC2Entries[mesh.containerInstanceMatrixIndex].transformMatrix;
+
+                            if (transformC2) {
+                                for (let i = 0; i < meshInstanceMatrices.length; ++i) {
+                                    mat4.multiply(meshInstanceMatrices[i], meshInstanceMatrices[i], transformC2!);
+                                }
+                            }
+                        }
+
+                        for (let instIdx in meshInstanceMatrices) {
+                            let meshInstMatrix = meshInstanceMatrices[instIdx];
+
+                            let meshInstMatrixAddress = meshInstanceMatrixAddresses[instIdx];
+
+                            // TODO doesnt work
+                            if (!objectAddresses.has(meshInstMatrixAddress)) {
+                                objectAddresses.add(meshInstMatrixAddress);
+                                obj_str += `o ${hexzero(meshInstMatrixAddress)}_${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkTotalIdx}_T${mesh.type}_${hexzero(mesh.offset)}\n`;
+                            }
+
+                            let chunkIdx = 0;
+                            for (let chunk of mesh.chunks) {
+                                // if (MESH_SEPARATE_TO_OBJECTS && !MESH_SEPARATE_ONLY_OBJECTS && MESH_SEPARATE_OBJECT_CHUNKS)
+                                //     obj_str += `o ${mesh.container.containerIndex}_[${object.header.index}]${object.header.name}_${mesh.meshIndex}_${chunkIdx}_${instIdx}_${chunkTotalIdx}_${hexzero(mesh.offset)}\n`;
+
+                                let newPos = vec3.create();
+
+                                for (let i = 0; i < chunk.positions.length; i += 3) {
+                                    const pos = vec3.fromValues(chunk.positions[i + 0], chunk.positions[i + 1], chunk.positions[i + 2]);
+
+                                    vec3.transformMat4(newPos, pos, meshInstMatrix);
+
+                                    let scaledPos = vec3.fromValues(
+                                        newPos[0] * MESH_SCALE,
+                                        newPos[1] * MESH_SCALE,
+                                        newPos[2] * MESH_SCALE);
+
+                                    obj_str += `v ${scaledPos[0]} ${scaledPos[1]} ${scaledPos[2]}\n`;
+                                }
+
+                                for (let i = 0; i < chunk.normals.length; i += 3) {
+                                    let normal = vec3.fromValues(chunk.normals[i], chunk.normals[i + 1], chunk.normals[i + 2]);
+
+                                    obj_str += `vn ${normal[0]} ${normal[1]} ${normal[2]}\n`;
+                                }
+
+                                for (let i = 0; i < chunk.texCoords.length; i += 2) {
+                                    const texCoord = vec2.fromValues(chunk.texCoords[i], chunk.texCoords[i + 1]);
+
+                                    obj_str += `vt ${texCoord[0]} ${texCoord[1]}\n`;
+                                }
+                                const szme = mesh.szme.chunks[chunkIdx];
+
+                                if (MESH_EXPORT_MATERIALS) {
+                                    obj_str += `usemtl ${object.header.index}_${szme!.textureId0}\n`
+                                }
+
+                                for (let i = 0; i < chunk.trianglesIndices1.length; i += 3) {
+                                    const f0 = face_idx_base + chunk.trianglesIndices1[i + 0];
+                                    const f1 = face_idx_base + chunk.trianglesIndices1[i + 1];
+                                    const f2 = face_idx_base + chunk.trianglesIndices1[i + 2];
+
+                                    obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
+                                }
+
+                                if (MESH_EXPORT_MATERIALS) {
+                                    obj_str += `usemtl ${object.header.index}_${szme!.textureId1}\n`
+                                }
+
+                                for (let i = 0; i < chunk.trianglesIndices2.length; i += 3) {
+                                    const f0 = face_idx_base + chunk.trianglesIndices2[i + 0];
+                                    const f1 = face_idx_base + chunk.trianglesIndices2[i + 1];
+                                    const f2 = face_idx_base + chunk.trianglesIndices2[i + 2];
+
+                                    obj_str += `f ${f0}/${f0}/${f0} ${f1}/${f1}/${f1} ${f2}/${f2}/${f2}\n`;
+                                }
+                                face_idx_base += chunk.positions.length / 3;
+
+                                chunkIdx++;
+                                chunkTotalIdx++;
+                            }
+                        }
+                        meshIdx++;
+                    }
+                }
+            }
+
+            downloadText(`${this.id}.obj`, obj_str);
+
+            if (MESH_EXPORT_MATERIALS) {
+                let mat_str = 'newmtl empty\n';
+
+                for (let object of objects) {
+                    for (let texture of object.texturesDiffuse) {
+                        mat_str += `newmtl ${object.header.index}_${texture.texEntryIdx}\n`;
+
+                        const texFilename = `${this.id}_textures/${texture.name}.png`;
+                        mat_str += `map_Kd ${texFilename}\n`;
+                        if (!texture.isFullyOpaque)
+                            mat_str += `map_d ${texFilename}\n`;
+                    }
+                }
+
+                downloadText(`${this.id}.mtl`, mat_str);
+            }
+        }
+
+
+
         return renderer;
     }
 }
