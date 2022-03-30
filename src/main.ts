@@ -83,6 +83,7 @@ import * as Scenes_JetSetRadio from './JetSetRadio/Scenes';
 import * as Scenes_Subnautica from './Subnautica/scenes';
 import * as Scenes_Glover from './Glover/scenes';
 import * as Scenes_HalfLife from './GoldSrc/Scenes_HalfLife';
+import * as Scenes_Hamsterball from './Hamsterball/scenes';
 
 import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops';
 
@@ -108,6 +109,7 @@ import { WebXRContext } from './WebXR';
 import { debugJunk } from './DebugJunk';
 
 const sceneGroups = [
+    /*
     "Wii",
     Scenes_MarioKartWii.sceneGroup,
     Scenes_KirbysReturnToDreamLand.sceneGroup,
@@ -201,6 +203,8 @@ const sceneGroups = [
     Scenes_JetSetRadio.sceneGroup,
     Scenes_Subnautica.sceneGroup,
     Scenes_HalfLife.sceneGroup,
+    */
+    Scenes_Hamsterball.sceneGroup,
 ];
 
 function convertCanvasToPNG(canvas: HTMLCanvasElement): Promise<Blob> {
