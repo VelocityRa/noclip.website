@@ -4,6 +4,7 @@ import { DataStream } from "./DataStream";
 
 export interface MaterialEntry {
     hasTex: boolean;
+    isOpaque: boolean;
 
     colors: Array<vec4>;
     name: string;
@@ -20,13 +21,15 @@ export interface VertexData {
     // materials: Map<string, Map<number, number>>;
 }
 
+type AllTriStripLists = Map<string, Map<number, number>>;
+
 export interface MeshWorld {
     vertexData: VertexData;
-    indexData: Uint16Array;
+    // indexData: Uint16Array;
     materialEntries: MaterialEntry[];
+    allTriStripLists: AllTriStripLists;
 }
 
-type AllTriStripLists = Map<string, Map<number, number>>;
 
 function parseMaterialEntry(ds: DataStream, allTriStripLists: AllTriStripLists): MaterialEntry {
     const nameLen = ds.u32();
@@ -62,7 +65,8 @@ function parseMaterialEntry(ds: DataStream, allTriStripLists: AllTriStripLists):
     ]);
     allTriStripLists.set(nameFinal, mergedList);
 
-    return { hasTex, colors, name: nameFinal, triStripList };
+    let isOpaque = true; // will be set later
+    return { hasTex, isOpaque, colors, name: nameFinal, triStripList };
 }
 
 function parseMaterialNode(ds: DataStream, materialEntries: MaterialEntry[], allTriStripLists: AllTriStripLists) {
@@ -116,8 +120,7 @@ export function parseMESHWORLD(buffer: NamedArrayBufferSlice): MeshWorld {
 
     let materialIds = new Uint32Array(0);
     let vertexData = { positions, normals, texcoords, materialIds }
-    let indexData = new Uint16Array(0);
-    return { vertexData, indexData, materialEntries };
+    return { vertexData, materialEntries, allTriStripLists };
 }
 
 // export function parseCACHED(buffer: NamedArrayBufferSlice): MeshWorld {
