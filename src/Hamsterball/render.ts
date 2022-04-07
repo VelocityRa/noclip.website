@@ -4,27 +4,31 @@ import { DeviceProgram } from '../Program';
 import * as Viewer from '../viewer';
 import * as UI from '../ui';
 
-import { GfxDevice, GfxBufferUsage, GfxBuffer, GfxInputState, GfxFormat, GfxInputLayout, GfxProgram, GfxBindingLayoutDescriptor, GfxRenderPass, GfxBindings, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxInputLayoutBufferDescriptor, GfxCullMode, makeTextureDescriptor2D, GfxMipFilterMode, GfxTexFilterMode, GfxTexture, GfxWrapMode, GfxBufferFrequencyHint } from '../gfx/platform/GfxPlatform';
+import { GfxDevice, GfxBufferUsage, GfxBuffer, GfxInputState, GfxFormat, GfxInputLayout, GfxProgram, GfxBindingLayoutDescriptor, GfxRenderPass, GfxBindings, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxInputLayoutBufferDescriptor, GfxCullMode, makeTextureDescriptor2D, GfxMipFilterMode, GfxTexFilterMode, GfxTexture, GfxWrapMode, GfxBufferFrequencyHint, GfxBlendMode, GfxBlendFactor } from '../gfx/platform/GfxPlatform';
 import { fillColor, fillFloat, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers';
-import { makeBackbufferDescSimple, pushAntialiasingPostProcessPass, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
+import { GfxrAttachmentClearDescriptor, makeAttachmentClearDescriptor, makeBackbufferDescSimple, pushAntialiasingPostProcessPass, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
 import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper';
-import { GfxRenderInstManager } from '../gfx/render/GfxRenderInstManager';
+import { GfxRendererLayer, GfxRenderInstManager, makeSortKey } from '../gfx/render/GfxRenderInstManager';
+import { setAttachmentStateSimple } from "../gfx/helpers/GfxMegaStateDescriptorHelpers";
 import { CameraController } from '../Camera';
 import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph';
-import { Red } from '../Color';
+import { colorNewFromRGBA, Red } from '../Color';
 import { MaterialEntry, MeshWorld, VertexData } from './bin';
 import { TextureMapping } from '../TextureHolder';
 import { SceneContext } from '../SceneBase';
 import ArrayBufferSlice from '../ArrayBufferSlice';
 import { DataFetcher } from '../DataFetcher';
 import { convertToTrianglesRange, GfxTopology } from '../gfx/helpers/TopologyHelpers';
-import { drawWorldSpacePoint, getDebugOverlayCanvas2D } from '../DebugJunk';
+import { drawWorldSpacePoint, drawWorldSpaceVector, getDebugOverlayCanvas2D, interactiveVizSliderSelect } from '../DebugJunk';
 
-// TODO: correct directional lighting
-// TODO: disable hitboxes etc via layers
-// TODO: trnansparency (for ie. arrow)
-// TODO: bg color
+// TODO:
+// correct directional lighting
+// mirrored support
+// specular
+// figure out second color in meshworld (just change it see results)
+// submeshes
+// animations
 
 class HamsterballProgram extends DeviceProgram {
     public static a_Position = 0;
@@ -66,10 +70,9 @@ void mainVS() {
 
     gl_Position = Mul(u_Projection, Mul(u_ModelView, vec4(a_Position, 1.0)));
     if (u_isOpaque == 0.0)
-        gl_Position.y += 0.1;
+        gl_Position.y += 1.0;
 
-
-    vec3 t_LightDirection = normalize(vec3(.2, -1, .5));
+    vec3 t_LightDirection = normalize(vec3(-.8, -1, .3));
     float t_LightIntensityF = dot(-a_Normal, t_LightDirection);
     float t_LightIntensityB = dot( a_Normal, t_LightDirection);
     v_LightIntensity = vec2(t_LightIntensityF, t_LightIntensityB);
@@ -83,12 +86,16 @@ void mainPS() {
     float t_LightTint = 0.3 * t_LightIntensity;
     if (u_hasTex == 0.0) {
         // gl_FragColor = vec4(1.0);
-        gl_FragColor = u_Colors[0] + vec4(t_LightTint, t_LightTint, t_LightTint, 0.0);
+        // gl_FragColor = u_Colors[0];
+        // gl_FragColor = u_Colors[0] + vec4(t_LightTint, t_LightTint, t_LightTint, 0.0);
+
+        gl_FragColor = u_Colors[0];
+        // float light = t_LightIntensity; // (t_LightIntensity - 0.1) * 2.0;
+        // float light = t_LightIntensity * 1.3 + 0.65;
+        float light = t_LightIntensity * 2.0;
+        gl_FragColor *= vec4(light, light, light, 1.0);
     } else {
         vec4 tex = texture(SAMPLER_2D(u_Texture), v_Texcoord.xy);
-        if (tex.a == 0.0)
-            discard;
-
         gl_FragColor = u_Colors[0] * tex;
     }
 
@@ -109,7 +116,7 @@ export class HamsterballRenderer {
     private posBuffer: GfxBuffer;
     private nrmBuffer: GfxBuffer;
     private texcoordsBuffer: GfxBuffer;
-    private materialIdBuffer: GfxBuffer;
+    // private materialIdBuffer: GfxBuffer;
 
     private indexBuffer: GfxBuffer;
     private indexBufferLen: number;
@@ -178,10 +185,10 @@ export class HamsterballRenderer {
         if (!this.visible)
             return;
 
-        const templateRenderInst = renderInstManager.pushTemplateRenderInst();
+        const template = renderInstManager.pushTemplateRenderInst();
 
-        let offs = templateRenderInst.allocateUniformBuffer(HamsterballProgram.ub_ObjectParams, 4 * 4 + 2);
-        const d = templateRenderInst.mapUniformBufferF32(HamsterballProgram.ub_ObjectParams);
+        let offs = template.allocateUniformBuffer(HamsterballProgram.ub_ObjectParams, 4 * 4 + 1 + 1);
+        const d = template.mapUniformBufferF32(HamsterballProgram.ub_ObjectParams);
         offs += fillVec4v(d, offs, this.materialEntry.colors[0]);
         offs += fillVec4v(d, offs, this.materialEntry.colors[1]);
         offs += fillVec4v(d, offs, this.materialEntry.colors[2]);
@@ -190,13 +197,13 @@ export class HamsterballRenderer {
         offs += fillFloat(d, offs, this.materialEntry.isOpaque ? 1.0 : 0.0);
 
         if (this.textureMapping) {
-            templateRenderInst.setSamplerBindingsFromTextureMappings([this.textureMapping]);
+            template.setSamplerBindingsFromTextureMappings([this.textureMapping]);
         }
 
-        if (this.name == "PinkChecker.bmp" && !this.textureMapping)
-            debugger;
+        template.setInputLayoutAndState(this.inputLayout, this.inputState);
 
-        templateRenderInst.setInputLayoutAndState(this.inputLayout, this.inputState);
+        let rendererLayer = this.materialEntry.isOpaque ? GfxRendererLayer.OPAQUE : GfxRendererLayer.TRANSLUCENT;
+        template.sortKey = makeSortKey(rendererLayer);
 
         // for (let triList of this.triLists) {
         //     const renderInst = renderInstManager.newRenderInst();
@@ -219,7 +226,7 @@ export class HamsterballRenderer {
         device.destroyBuffer(this.nrmBuffer);
         device.destroyBuffer(this.indexBuffer);
         device.destroyBuffer(this.texcoordsBuffer);
-        device.destroyBuffer(this.materialIdBuffer);
+        // device.destroyBuffer(this.materialIdBuffer);
         device.destroyInputState(this.inputState);
     }
 }
@@ -261,6 +268,7 @@ export class Scene implements Viewer.SceneGfx {
     private textureMappings: Map<string, TextureMapping> = new Map();
 
     private renderHelper: GfxRenderHelper;
+    private fullClearRenderPassDescriptor: GfxrAttachmentClearDescriptor;
 
     constructor(private device: GfxDevice, private context: SceneContext, public meshWorld: MeshWorld) {
         this.program = device.createProgram(new HamsterballProgram());
@@ -279,14 +287,26 @@ export class Scene implements Viewer.SceneGfx {
         ];
         const indexBufferFormat = GfxFormat.U16_R;
         this.inputLayout = device.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors, indexBufferFormat });
+
+        const bgColor = meshWorld.bgColor;
+        const bcColorGfx = colorNewFromRGBA(bgColor[0], bgColor[1], bgColor[2], 1.0);
+        this.fullClearRenderPassDescriptor = makeAttachmentClearDescriptor(bcColorGfx);
     }
 
     public async init() {
-        const sampler = this.device.createSampler({
+        const samplerPoint = this.device.createSampler({
             wrapS: GfxWrapMode.Repeat,
             wrapT: GfxWrapMode.Repeat,
             minFilter: GfxTexFilterMode.Point,
             magFilter: GfxTexFilterMode.Point,
+            mipFilter: GfxMipFilterMode.Nearest,
+            minLOD: 0, maxLOD: 0,
+        });
+        const samplerBilinear = this.device.createSampler({
+            wrapS: GfxWrapMode.Repeat,
+            wrapT: GfxWrapMode.Repeat,
+            minFilter: GfxTexFilterMode.Bilinear,
+            magFilter: GfxTexFilterMode.Bilinear,
             mipFilter: GfxMipFilterMode.Nearest,
             minLOD: 0, maxLOD: 0,
         });
@@ -298,16 +318,30 @@ export class Scene implements Viewer.SceneGfx {
                 const texturePath = `Hamsterball/Textures/${textureName}`; // TODO: don't hardcode path
                 let imageData = await fetchImage(this.context.dataFetcher, texturePath);
 
+                let usePointFiltering = true;
+                // Figure out its filtering mode
+                // Assumes filtering is the same for all material entries of the same texture image
+                // for (const material of this.meshWorld.materialEntries) {
+                //     if (material.name == textureName) {
+                //         usePointFiltering = material.usePointFiltering;
+                //         break;
+                //     }
+                // }
+                usePointFiltering = textureName.includes("Checker");
+
                 let textureMapping = new TextureMapping();
                 textureMapping.gfxTexture = makeTextureFromImageData(this.device, imageData);
-                textureMapping.gfxSampler = sampler;
+                if (usePointFiltering)
+                    textureMapping.gfxSampler = samplerPoint;
+                else
+                    textureMapping.gfxSampler = samplerBilinear;
                 textureMapping.width = imageData.width;
                 textureMapping.height = imageData.height;
                 this.textureMappings.set(textureName, textureMapping);
 
                 let isOpaque = true;
                 for (let i = 3; i < imageData.data.length; i += 4) {
-                    if (imageData.data[i] != 255) {
+                    if (imageData.data[i] != 0xFF) {
                         isOpaque = false;
                         break;
                     }
@@ -326,6 +360,13 @@ export class Scene implements Viewer.SceneGfx {
         this.renderHelper = new GfxRenderHelper(this.device);
     }
 
+    // For debugging
+    public objectSelect(): void {
+        interactiveVizSliderSelect(this.hamsterballRenderers, 'visible', (instance) => {
+            console.log(instance);
+        });
+    }
+
     public adjustCameraController(c: CameraController) {
         c.setSceneMoveSpeedMult(0.25);
     }
@@ -334,7 +375,13 @@ export class Scene implements Viewer.SceneGfx {
         const template = this.renderHelper.pushTemplateRenderInst();
         template.setBindingLayouts(bindingLayouts);
         template.setGfxProgram(this.program);
-        template.setMegaStateFlags({ cullMode: GfxCullMode.Back });
+        template.setMegaStateFlags(setAttachmentStateSimple({
+            cullMode: GfxCullMode.Back,
+        }, {
+            blendMode: GfxBlendMode.Add,
+            blendSrcFactor: GfxBlendFactor.SrcAlpha,
+            blendDstFactor: GfxBlendFactor.OneMinusSrcAlpha,
+        }));
 
         let offs = template.allocateUniformBuffer(HamsterballProgram.ub_SceneParams, 32);
         const mapped = template.mapUniformBufferF32(HamsterballProgram.ub_SceneParams);
@@ -352,7 +399,7 @@ export class Scene implements Viewer.SceneGfx {
     public render(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput) {
         const renderInstManager = this.renderHelper.renderInstManager;
 
-        const mainColorDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.Color0, viewerInput, standardFullClearRenderPassDescriptor);
+        const mainColorDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.Color0, viewerInput, this.fullClearRenderPassDescriptor);
         const mainDepthDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.DepthStencil, viewerInput, standardFullClearRenderPassDescriptor);
 
         const builder = this.renderHelper.renderGraph.newGraphBuilder();
@@ -370,11 +417,15 @@ export class Scene implements Viewer.SceneGfx {
         pushAntialiasingPostProcessPass(builder, this.renderHelper, viewerInput, mainColorTargetID);
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
-        // const ctx = getDebugOverlayCanvas2D();
+        const ctx = getDebugOverlayCanvas2D();
         // drawWorldSpacePoint(ctx, viewerInput.camera.clipFromWorldMatrix, [1935.884, 	418.117, 	-1540.019]);
         // drawWorldSpacePoint(ctx, viewerInput.camera.clipFromWorldMatrix, [1468.527, 	418.117, 	-1148.344]);
         // drawWorldSpacePoint(ctx, viewerInput.camera.clipFromWorldMatrix, [779.010, 	418.117, 	-443.763]);
         // drawWorldSpacePoint(ctx, viewerInput.camera.clipFromWorldMatrix, [-21.587, 	418.117, 	417.271]);
+
+        let dir = vec3.fromValues(-.5, -1, .2);
+        vec3.normalize(dir, dir);
+        drawWorldSpaceVector(ctx, viewerInput.camera.clipFromWorldMatrix, [0,0,0], dir, 1000);
 
         this.prepareToRender(device, viewerInput);
         this.renderHelper.renderGraph.execute(builder);

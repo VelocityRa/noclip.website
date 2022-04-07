@@ -16,7 +16,7 @@ export interface VertexData {
     positions: Float32Array; // vec3
     normals: Float32Array; // vec3
     texcoords: Float32Array; // vec2
-    materialIds: Uint32Array; // uint
+    // materialIds: Uint32Array; // uint
 
     // materials: Map<string, Map<number, number>>;
 }
@@ -28,6 +28,8 @@ export interface MeshWorld {
     // indexData: Uint16Array;
     materialEntries: MaterialEntry[];
     allTriStripLists: AllTriStripLists;
+
+    bgColor: vec3;
 }
 
 
@@ -90,9 +92,43 @@ function parseMaterialNode(ds: DataStream, materialEntries: MaterialEntry[], all
 export function parseMESHWORLD(buffer: NamedArrayBufferSlice): MeshWorld {
     let ds = new DataStream(buffer);
 
-    // TODO
+    const spotCount = ds.u32();
+    for (let i = 0; i < spotCount; ++i) {
+        const nameLen = ds.u32();
+        const name = ds.readString(nameLen);
+        ds.offs += 3 * 4 + 4 + 4 + 4;
+        const containsOpt = ds.u32();
+        if (containsOpt != 0) {
+            ds.offs += 4 * 4 * 4 + 4 + 4;
+            const containsOpt2 = ds.u32();
+            if (containsOpt2 == 1) {
+                const name2Len = ds.u32();
+                const name2 = ds.readString(name2Len);
+            }
+        }
+    }
 
-    ds.offs = 0x6EA;
+    const unk0Count = ds.u32();
+    for (let i = 0; i < unk0Count; ++i) {
+        const nameLen = ds.u32();
+        const name = ds.readString(nameLen);
+        const unkVecCount = ds.u32();
+        ds.offs += unkVecCount * 3 * 4;
+    }
+
+    const unk1Count = ds.u32();
+    for (let i = 0; i < unk1Count; ++i) {
+        const containsOpt = ds.u32();
+        if (containsOpt == 0) {
+            ds.vec3();
+            ds.vec3();
+            ds.vec3();
+        }
+    }
+
+    const bgColor = ds.vec3();
+    const unkColor = ds.vec3(); // ???
+
     const vertexCount = ds.u32();
     let positions = new Float32Array(vertexCount * 3);
     let normals = new Float32Array(vertexCount * 3);
@@ -120,7 +156,7 @@ export function parseMESHWORLD(buffer: NamedArrayBufferSlice): MeshWorld {
 
     let materialIds = new Uint32Array(0);
     let vertexData = { positions, normals, texcoords, materialIds }
-    return { vertexData, materialEntries, allTriStripLists };
+    return { vertexData, materialEntries, allTriStripLists, bgColor };
 }
 
 // export function parseCACHED(buffer: NamedArrayBufferSlice): MeshWorld {

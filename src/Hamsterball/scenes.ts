@@ -11,7 +11,7 @@ const pathBase = `Hamsterball`;
 
 const DUMP_OBJ = false;
 
-export class HambsterballSceneDesc implements SceneDesc {
+export class HamsterballSceneDesc implements SceneDesc {
     constructor(public id: string, public name: string = id) {
     }
 
@@ -95,9 +95,51 @@ export class HambsterballSceneDesc implements SceneDesc {
 }
 
 const sceneDescs = [
-    new HambsterballSceneDesc('Level1'),
+    new HamsterballSceneDesc("Arena-Beginner"),
+    new HamsterballSceneDesc("Arena-Dizzy"),
+    new HamsterballSceneDesc("Arena-Intermediate"),
+    new HamsterballSceneDesc("Arena-Neon"),
+    new HamsterballSceneDesc("Arena-SpawnPlatform"),
+    new HamsterballSceneDesc("Arena-Stands"),
+    new HamsterballSceneDesc("Arena-Tower"),
+    new HamsterballSceneDesc("Arena-Up"),
+    new HamsterballSceneDesc("Arena-WarmUp"),
+    new HamsterballSceneDesc("Level1"),
+    new HamsterballSceneDesc("Level2-Bridge"),
+    new HamsterballSceneDesc("Level2"),
+    new HamsterballSceneDesc("Level3-Gluebie"),
+    new HamsterballSceneDesc("Level3-Swirl"),
+    new HamsterballSceneDesc("Level3-Tipper"),
+    new HamsterballSceneDesc("Level3-WaterWheel"),
+    new HamsterballSceneDesc("Level3"),
+    new HamsterballSceneDesc("Level4-Catapult"),
+    new HamsterballSceneDesc("Level4-Drawbridge"),
+    new HamsterballSceneDesc("Level4-Mace"),
+    new HamsterballSceneDesc("Level4-Trapdoor1"),
+    new HamsterballSceneDesc("Level4-Trapdoor2"),
+    new HamsterballSceneDesc("Level4-Turret"),
+    new HamsterballSceneDesc("Level4-Windmill"),
+    new HamsterballSceneDesc("Level4"),
+    new HamsterballSceneDesc("Level6-Lifter"),
+    new HamsterballSceneDesc("LevelCascade"),
+    new HamsterballSceneDesc("LevelDark-DFloor1"),
+    new HamsterballSceneDesc("LevelDark-DFloor2"),
+    new HamsterballSceneDesc("LevelDark-DFloor3"),
+    new HamsterballSceneDesc("LevelDark-DFloor4"),
+    new HamsterballSceneDesc("LevelDark-FlickRing"),
+    new HamsterballSceneDesc("LevelDark-NeonPlatform"),
+    new HamsterballSceneDesc("LevelDark-Trode"),
+    new HamsterballSceneDesc("LevelDark"),
+    new HamsterballSceneDesc("LevelUp-Button"),
+    new HamsterballSceneDesc("LevelUp-Lifter"),
+    new HamsterballSceneDesc("LevelUp-SpeedCylinder"),
+    new HamsterballSceneDesc("LevelUp"),
+    new HamsterballSceneDesc("MouseTrap"),
+    new HamsterballSceneDesc("PopupSign"),
+    new HamsterballSceneDesc("Secret-Unlock"),
+    new HamsterballSceneDesc("Secret"),
 ];
 
-const id = 'Hambsterball';
-const name = "Hambsterball";
+const id = "Hamsterball";
+const name = "Hamsterball";
 export const sceneGroup: SceneGroup = { id, name, sceneDescs };
