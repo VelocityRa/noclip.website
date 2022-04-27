@@ -94,6 +94,7 @@ import * as Scenes_EstrangedActI from './SourceEngine/Scenes_EstrangedActI.js';
 import * as Scenes_AShortHike from './AShortHike/Scenes.js';
 import * as Scenes_NeonWhite from './NeonWhite/Scenes.js';
 import * as Scenes_OuterWilds from './OuterWilds/Scenes.js';
+import * as Scenes_SlyDump from './SlyDump/scenes';
 
 import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops.js';
 
@@ -225,6 +226,7 @@ const sceneGroups: (string | SceneGroup)[] = [
     Scenes_AShortHike.sceneGroup,
     Scenes_NeonWhite.sceneGroup,
     Scenes_OuterWilds.sceneGroup,
+    Scenes_SlyDump.sceneGroup,
 ];
 
 function convertCanvasToPNG(canvas: HTMLCanvasElement): Promise<Blob> {

@@ -4,7 +4,7 @@
 
 import CRC32 from 'crc-32';
 import ArrayBufferSlice from './ArrayBufferSlice.js';
-import { readString, assert } from './util.js';
+import { readString, assert, nullify } from './util.js';
 import * as Deflate from './Common/Compression/Deflate.js';
 import * as LZMA from './Common/Compression/LZMA.js';
 
@@ -195,4 +195,16 @@ export function decompressZipFileEntry(entry: ZipFileEntry): ArrayBufferSlice {
     } else {
         throw "whoops";
     }
+}
+
+export function getZipEntry(zipFile: ZipFile, filename: string): ZipFileEntry | null {
+    return nullify(zipFile.find((entry) => entry.filename === filename));
+}
+
+export function getFileFromZip(zipFile: ZipFile, filename: string): ArrayBufferSlice {
+    const zipEntry = getZipEntry(zipFile, filename);
+    if (zipEntry === null)
+        throw new Error(`Could not find zip entry for filename: ${filename}`);
+
+    return decompressZipFileEntry(zipEntry);
 }
