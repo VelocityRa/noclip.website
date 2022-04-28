@@ -1,3 +1,4 @@
+import { mat4, vec4 } from "gl-matrix";
 import ArrayBufferSlice from "../ArrayBufferSlice";
 import { ZipFile } from "../ZipFile";
 
@@ -14,6 +15,11 @@ export interface DumpChunk {
     vertexData: VertexData;
     indexData: Uint16Array;
     textureName: string | null;
+    vc17: vec4;
+    vc18: vec4;
+    vc19: vec4;
+    vc29: vec4;
+    projMatrix: mat4;
 }
 
 interface ObjFaceVertex {
@@ -35,9 +41,16 @@ interface ObjModel {
     vertices: number[];
     textureCoords: number[];
     vertexNormals: number[];
-    vertexDiff: number[]; // custom
-    vertexSpec: number[]; // custom
     faces: ObjFace[];
+
+    // Sly data
+    vertexDiff: number[];
+    vertexSpec: number[];
+    vc17: number[];
+    vc18: number[];
+    vc19: number[];
+    vc29: number[];
+    projMatrix: mat4;
 }
 
 interface ObjResult {
@@ -101,6 +114,9 @@ export class ObjFile {
                 case 'v36':
                     this.parseV36(lineItems);
                     break;
+                case 'vc':
+                    this.parseVc(lineItems);
+                    break;
                 case 's': // Smooth shading statement
                     this.parseSmoothShadingStatement(lineItems);
                     break;
@@ -126,9 +142,14 @@ export class ObjFile {
                 vertices: [],
                 textureCoords: [],
                 vertexNormals: [],
+                faces: [],
                 vertexDiff: [],
                 vertexSpec: [],
-                faces: []
+                vc17: [],
+                vc18: [],
+                vc19: [],
+                vc29: [],
+                projMatrix: mat4.create(),
             });
             this.currentGroup = '';
             this.smoothingGroup = 0;
@@ -144,9 +165,14 @@ export class ObjFile {
             vertices: [],
             textureCoords: [],
             vertexNormals: [],
+            faces: [],
             vertexDiff: [],
             vertexSpec: [],
-            faces: []
+            vc17: [],
+            vc18: [],
+            vc19: [],
+            vc29: [],
+            projMatrix: mat4.create(),
         });
         this.currentGroup = '';
         this.smoothingGroup = 0;
@@ -203,6 +229,21 @@ export class ObjFile {
         this.currentModel().textureCoords.push(u, v);
         this.currentModel().vertexDiff.push(vdiff);
         this.currentModel().vertexSpec.push(vspec);
+    }
+
+    private parseVc(lineItems: string[]) {
+        let n = 1;
+        this.currentModel().vc17.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
+        this.currentModel().vc18.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
+        this.currentModel().vc19.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
+        this.currentModel().vc29.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
+
+        this.currentModel().projMatrix = mat4.fromValues(
+            parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),
+            parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),
+            parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),
+            parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++])
+        );
     }
 
     private parsePolygon(lineItems: string[]) {
@@ -306,7 +347,14 @@ export function parseDump(obj: ObjResult): DumpChunk[] {
         // TODO: Simplification
         const textureName = model.faces.length > 0 ? model.faces[0].material : null;
 
-        dumpChunks.push({ name: model.name, vertexData, indexData: indices, textureName });
+        const vc17 = vec4.fromValues(model.vc17[0],model.vc17[1],model.vc17[2],model.vc17[3]);
+        const vc18 = vec4.fromValues(model.vc18[0],model.vc18[1],model.vc18[2],model.vc18[3]);
+        const vc19 = vec4.fromValues(model.vc19[0],model.vc19[1],model.vc19[2],model.vc19[3]);
+        const vc29 = vec4.fromValues(model.vc29[0], model.vc29[1], model.vc29[2], model.vc29[3]);
+
+        let projMatrix = model.projMatrix;
+
+        dumpChunks.push({ name: model.name, vertexData, indexData: indices, textureName, vc17, vc18, vc19, vc29, projMatrix });
     }
 
     return dumpChunks;

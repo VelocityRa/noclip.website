@@ -5,7 +5,7 @@ import * as Viewer from '../viewer';
 import * as UI from '../ui';
 
 import { GfxDevice, GfxBufferUsage, GfxBuffer, GfxInputState, GfxFormat, GfxInputLayout, GfxProgram, GfxBindingLayoutDescriptor, GfxRenderPass, GfxBindings, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxInputLayoutBufferDescriptor, GfxCullMode, GfxBlendFactor, GfxBlendMode, GfxTexture, makeTextureDescriptor2D, GfxMipFilterMode, GfxTexFilterMode, GfxWrapMode } from '../gfx/platform/GfxPlatform';
-import { fillColor, fillMatrix4x4 } from '../gfx/helpers/UniformBufferHelpers';
+import { fillColor, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers';
 import { makeBackbufferDescSimple, pushAntialiasingPostProcessPass, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
 import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper';
@@ -37,9 +37,11 @@ layout(std140) uniform ub_SceneParams {
 };
 
 layout(std140) uniform ub_ObjectParams {
-    // float nearPlane;
-    // float farPlane;
-    vec4 dummy;
+    vec4 vc17;
+    vec4 vc18;
+    vec4 vc19;
+    vec4 vc29;
+    Mat4x4 u_GameProjectionMat;
 };
 
 layout(binding = 0) uniform sampler2D u_Texture;
@@ -48,6 +50,8 @@ varying vec3 v_Normal;
 varying vec2 v_Texcoord;
 varying vec4 v_Diff;
 varying vec4 v_Spec;
+varying vec3 v_AmbientColor;
+varying float v_Depth;
 
 #ifdef VERT
 layout(location = ${SlyDumpProgram.a_Position}) attribute vec3 a_Position;
@@ -56,42 +60,56 @@ layout(location = ${SlyDumpProgram.a_Texcoord}) attribute vec2 a_Texcoord;
 layout(location = ${SlyDumpProgram.a_Diff}) attribute vec4 a_Diff;
 layout(location = ${SlyDumpProgram.a_Spec}) attribute vec4 a_Spec;
 
-void mainVS() {
-    v_Normal = a_Normal;
-    v_Texcoord = a_Texcoord;
-    v_Diff = a_Diff;
-    v_Spec = a_Spec;
+float saturate(float x) {
+    return clamp(x, 0.0, 1.0);
+}
 
-    const float t_ModelScale = 1.0;
-    gl_Position = Mul(u_Projection, Mul(u_ModelView, vec4(a_Position * t_ModelScale, 1.0)));
+void mainVS() {
+    vec4 diffSpecMultiplier = vc17;
+    vec4 texcoordOffset = vc18;
+    vec4 ambientColor = vc19;
+    // vec4 vc29 = vc29;
+
+    v_Normal = a_Normal;
+    v_Texcoord = texcoordOffset.xy + a_Texcoord;
+    v_Diff = a_Diff * diffSpecMultiplier;
+    v_Spec = a_Spec * diffSpecMultiplier;
+    v_AmbientColor = ambientColor.rgb;
+
+    vec4 modelViewPos = Mul(u_ModelView, vec4(a_Position, 1.0));
+
+    gl_Position = Mul(u_Projection, modelViewPos);
+
+    vec4 gameVertexPosition = Mul(u_GameProjectionMat, modelViewPos);
+
+    // v_Depth = saturate((gameVertexPosition.z - vc29.x) * vc29.y) * vc29.w * 100.0;
+    // v_Depth = (gameVertexPosition.z - vc29.x) / 1000.0;
+    // v_Depth = gl_FragCoord.z * 1.0;
+    v_Depth = 0.0;
 }
 #endif
 
 #ifdef FRAG
-
+float saturate(float x) {
+    return clamp(x, 0.0, 1.0);
+}
 vec4 fma4(vec4 a, vec4 b, vec4 c) {
     return a * b + c;
 }
 
 void mainPS() {
-    // vec4 tex = texture(SAMPLER_2D(u_Texture), v_Texcoord);
-    // gl_FragColor = tex;
+    // float originalZ = gl_FragCoord.z / gl_FragCoord.w;
+    float c = gl_FragCoord.z * 900.0;
+    float depth = clamp(1.0 - c, 0.05, 0.7);
+    // gl_FragColor = vec4(c, c, c, 1.0); return;
 
-    // gl_FragColor = vec4(v_Diff.rgb, 1.0);
-    // gl_FragColor = vec4(v_Diff.aaa, 1.0);
-    // gl_FragColor = vec4(v_Spec.rgb, 1.0);
-    // gl_FragColor = vec4(v_Spec.aaa, 1.0);
-
-    // gl_FragColor.rgb = vec3(v_Texcoord.x, v_Texcoord.y, 0.0);
-    // gl_FragColor.rgb = vec3(v_Normal.x, v_Normal.y, v_Normal.z);
-    // gl_FragColor.a = 1.0; // TODO
+    // gl_FragColor = vec4(v_Depth, v_Depth, v_Depth, 1.0); return;
 
 
     vec4 diff_color = v_Diff;
     vec4 spec_color = v_Spec;
 
     vec4 fc80 = vec4(0.30, 0.59, 0.11, 0.0);
-    vec4 tc1 = vec4(0.08235, 0.33333, 0.58824, 1.00);
 
     vec4 h0 = vec4(0.);
     vec4 h1 = vec4(0.);
@@ -100,19 +118,20 @@ void mainPS() {
 
 	h1 = texture(SAMPLER_2D(u_Texture), v_Texcoord);
 	h2 = spec_color;
-	h2.xyz = ((h1 * h2) * 2.).xyz;
+	h2.rgb = ((h1 * h2) * 2.).rgb;
 	h0 = diff_color;
-	h1.x = vec4(dot(h1.xyz, fc80.xyz)).x;
-	// h0.w = ((h0 * h1) * 4.).w;
-	h0.w = ((h0 * h1) * 2.).w;
-	// h3.w = v_Texcoord.zzzz.w;
-	h3.w = 0.0;
-	h3.xyz = ((h0 * h1.xxxx) * 2.).xyz;
-	h1.xyz = fma4(h3.wwww, -h2, h2).xyz;
-	h0.xyz = (tc1 + -h3).xyz;
-	h0.xyz = (fma4(h3.wwww, h0, h3) / 2.).xyz;
-	h0.xyz = (fma4(h1, h2.wwww, h0) * 2.).xyz;
+	h1.x = vec4(dot(h1.rgb, fc80.rgb)).x;
+	// h0.a = ((h0 * h1) * 4.).a;
+	h0.a = h0.a * h1.a * 2.0;
 
+    // h3.a = v_Depth;
+	h3.a = depth;
+
+	h3.rgb = ((h0 * h1.xxxx) * 2.).rgb;
+	h1.rgb = fma4(h3.aaaa, -h2, h2).rgb;
+	h0.rgb = v_AmbientColor - h3.rgb;
+	h0.rgb = (fma4(h3.aaaa, h0, h3) / 2.).rgb;
+	h0.rgb = (fma4(h1, h2.aaaa, h0) * 2.).rgb;
 
     gl_FragColor = h0;
 }
@@ -174,9 +193,13 @@ export class SlyDumpRenderer {
 
         const template = renderInstManager.pushTemplateRenderInst();
 
-        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4);
+        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4);
         const d = template.mapUniformBufferF32(SlyDumpProgram.ub_ObjectParams);
-        offs += fillColor(d, offs, Red);
+        offs += fillVec4v(d, offs, this.dumpChunk.vc17);
+        offs += fillVec4v(d, offs, this.dumpChunk.vc18);
+        offs += fillVec4v(d, offs, this.dumpChunk.vc19);
+        offs += fillVec4v(d, offs, this.dumpChunk.vc29);
+        offs += fillMatrix4x4(d, offs, this.dumpChunk.projMatrix);
 
         if (this.textureMapping) {
             template.setSamplerBindingsFromTextureMappings([this.textureMapping]);
@@ -278,7 +301,7 @@ export class Scene implements Viewer.SceneGfx {
     }
 
     public adjustCameraController(c: CameraController) {
-        c.setSceneMoveSpeedMult(.01);
+        c.setSceneMoveSpeedMult(1.0);
     }
 
     private prepareToRender(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput): void {
@@ -294,7 +317,7 @@ export class Scene implements Viewer.SceneGfx {
         }));
 
         // TODO: check if fog is different depending on this
-        viewerInput.camera.setClipPlanes(0.1, 3000);
+        viewerInput.camera.setClipPlanes(10, 300000);
 
         let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_SceneParams, 32);
         const mapped = template.mapUniformBufferF32(SlyDumpProgram.ub_SceneParams);

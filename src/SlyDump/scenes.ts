@@ -42,12 +42,8 @@ export class SlyDumpSceneDesc implements SceneDesc {
 
         let textures = new Map<string, ImageData>();
         for (let materialName of obj.materials) {
-            if (materialName == "0x0"||materialName=="0x78806C28"||materialName=="0x78807218")
+            if (materialName == "0x0")
                 continue;
-            // if (materialName == "0x0" || materialName == "0x79ACF478" || materialName == "0x76DAA3A8" ||
-                // materialName == "0x76DAA278" || materialName == "0x74436288" || materialName == "0x74435448" || materialName == "0x74436158"
-            // ||materialName=="0x74435DC8"||materialName=="0x74435A38"||materialName=="0x74435B68") // TODO
-                // continue;
             const texturePath = `${pathBase}/${this.id}/${materialName}.png`;
             try {
                 let imageData = await fetchImage(sceneContext.dataFetcher, texturePath);
