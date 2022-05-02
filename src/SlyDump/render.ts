@@ -1,4 +1,4 @@
-import { mat4, vec3 } from 'gl-matrix';
+import { mat4, vec3, vec4 } from 'gl-matrix';
 
 import { DeviceProgram } from '../Program';
 import * as Viewer from '../viewer';
@@ -9,7 +9,7 @@ import { fillColor, fillFloat, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx
 import { makeBackbufferDescSimple, pushAntialiasingPostProcessPass, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
 import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper';
-import { GfxRenderInstManager } from '../gfx/render/GfxRenderInstManager';
+import { GfxRendererLayer, GfxRenderInstManager, makeSortKey } from '../gfx/render/GfxRenderInstManager';
 import { CameraController } from '../Camera';
 import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph';
 import { Red } from '../Color';
@@ -72,10 +72,15 @@ void mainVS() {
     // vec4 vc29 = vc29;
 
     v_Normal = a_Normal;
-    v_Texcoord = texcoordOffset.xy + a_Texcoord;
     v_Diff = a_Diff * diffSpecMultiplier;
     v_Spec = a_Spec * diffSpecMultiplier;
     v_AmbientColor = ambientColor.rgb;
+
+    if (u_DrawType == 4.0) { // Normal2
+        v_Texcoord = a_Texcoord;
+    } else {
+        v_Texcoord = texcoordOffset.xy + a_Texcoord;
+    }
 
     vec3 pos = a_Position.xzy * vec3(1.0, 1.0, -1.0);
     vec4 modelViewPos = Mul(u_ModelView, vec4(pos, 1.0));
@@ -103,16 +108,16 @@ vec4 fma4(vec4 a, vec4 b, vec4 c) {
 
 void mainPS() {
     // float originalZ = gl_FragCoord.z / gl_FragCoord.w;
-    float c = gl_FragCoord.z * 900.0;
+    float c = gl_FragCoord.z * 1100.0;
     float depth = clamp(1.0 - c, 0.05, 0.7);
+
     // gl_FragColor = vec4(c, c, c, 1.0); return;
-
     // gl_FragColor = vec4(v_Depth, v_Depth, v_Depth, 1.0); return;
-
 
     vec4 diff_color = v_Diff;
     vec4 spec_color = v_Spec;
 
+    // TODO
     vec4 fc80 = vec4(0.30, 0.59, 0.11, 0.0);
 
     vec4 h0 = vec4(0.);
@@ -122,14 +127,20 @@ void mainPS() {
 
 	h1 = texture(SAMPLER_2D(u_Texture), v_Texcoord);
 
-    if (u_DrawType == 1.0) { // Skydome
+    // gl_FragColor = h1; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = spec_color; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = spec_color.aaaa; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = diff_color; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = diff_color.aaaa; gl_FragColor.a = 1.0; return;
+
+    if (u_DrawType == 2.0) { // Nospec
         h0 = saturate(diff_color);
         h0.xyz = ((h0 * h1) * 2.).xyz;
         h0.w = ((h0 * h1) * 2.).w;
         h1.xyz = v_AmbientColor - h0.rgb;
         h2.w = depth;
         h0.xyz = fma4(h2.wwww, h1, h0).xyz;
-    } else if (u_DrawType == 0.0) { // Normal
+    } else { // if (u_DrawType == 0.0) { // Normal
         h2 = spec_color;
         h2.rgb = ((h1 * h2) * 2.).rgb;
         h0 = diff_color;
@@ -211,7 +222,13 @@ export class SlyDumpRenderer {
         const d = template.mapUniformBufferF32(SlyDumpProgram.ub_ObjectParams);
         offs += fillVec4v(d, offs, this.dumpChunk.vc17);
         offs += fillVec4v(d, offs, this.dumpChunk.vc18);
-        offs += fillVec4v(d, offs, this.dumpChunk.vc19);
+        // TODO
+        if (this.dumpChunk.drawType == 4.0) { // Normal2
+            // const fc160 = vec4.fromValues(0.08235, 0.33333, 0.58824, 1.00); // intro?
+            const fc160 = vec4.fromValues(0.09804, 0.08235, 0.07451, 1.00); // pirate
+            offs += fillVec4v(d, offs, fc160);
+        } else
+            offs += fillVec4v(d, offs, this.dumpChunk.vc19);
         offs += fillVec4v(d, offs, this.dumpChunk.vc29);
         offs += fillMatrix4x4(d, offs, this.dumpChunk.projMatrix);
         offs += fillFloat(d, offs, this.dumpChunk.drawType);
@@ -219,6 +236,20 @@ export class SlyDumpRenderer {
         if (this.textureMapping) {
             template.setSamplerBindingsFromTextureMappings([this.textureMapping]);
         }
+
+        const isSkydome = (this.dumpChunk.name.endsWith("_clr:1_blk:2"));
+
+        let rendererLayer: GfxRendererLayer;
+        if (this.dumpChunk.textureName == "0x703A2F08")
+            rendererLayer = GfxRendererLayer.OPAQUE + 1;
+        else if (isSkydome)
+            rendererLayer = GfxRendererLayer.BACKGROUND;
+        else if (this.dumpChunk.textureIsOpaque)
+            rendererLayer = GfxRendererLayer.OPAQUE;
+        else
+            rendererLayer = GfxRendererLayer.TRANSLUCENT;
+
+        template.sortKey = makeSortKey(rendererLayer);
 
         const renderInst = renderInstManager.newRenderInst();
         renderInst.setInputLayoutAndState(this.inputLayout, this.inputState);
@@ -316,7 +347,7 @@ export class Scene implements Viewer.SceneGfx {
     }
 
     public adjustCameraController(c: CameraController) {
-        c.setSceneMoveSpeedMult(1.0);
+        c.setSceneMoveSpeedMult(0.7);
     }
 
     private prepareToRender(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput): void {
@@ -324,7 +355,7 @@ export class Scene implements Viewer.SceneGfx {
         template.setBindingLayouts(bindingLayouts);
         template.setGfxProgram(this.program);
         template.setMegaStateFlags(setAttachmentStateSimple({
-            cullMode: GfxCullMode.Back,
+            cullMode: GfxCullMode.None,
         }, {
             blendMode: GfxBlendMode.Add,
             blendSrcFactor: GfxBlendFactor.SrcAlpha,

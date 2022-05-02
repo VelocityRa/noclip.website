@@ -335,7 +335,7 @@ export class FloatingPanel implements Widget {
             } else {
                 valueStr = value.toFixed(fracDig);
             }
-    
+
             slider.setLabel(`${labelName} = ${valueStr}`);
 
             let changedCallback = Reflect.getMetadata('df:changedcallback', obj, paramName);
@@ -441,7 +441,7 @@ export class DebugFloaterHolder {
 
     public makeFloatingPanel(title: string = 'Floating Panel', icon: string = RENDER_HACKS_ICON): FloatingPanel {
         const panel = new FloatingPanel();
-        panel.setWidth(`600px`);
+        panel.setWidth(`1800px`);
         panel.setTitle(icon, title);
         panel.onclose = () => {
             if (this.debugFloater === panel)

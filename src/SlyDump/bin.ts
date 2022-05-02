@@ -1,6 +1,4 @@
 import { mat4, vec4 } from "gl-matrix";
-import ArrayBufferSlice from "../ArrayBufferSlice";
-import { ZipFile } from "../ZipFile";
 
 export interface VertexData {
     positions: Float32Array; // vec3
@@ -15,6 +13,7 @@ export interface DumpChunk {
     vertexData: VertexData;
     indexData: Uint16Array;
     textureName: string | null;
+    textureIsOpaque: boolean;
     drawType: number;
     vc17: vec4;
     vc18: vec4;
@@ -53,6 +52,7 @@ interface ObjModel {
     vc19: number[];
     vc29: number[];
     projMatrix: mat4;
+    textureIsOpaque: boolean;
 }
 
 interface ObjResult {
@@ -156,6 +156,7 @@ export class ObjFile {
                 vc19: [],
                 vc29: [],
                 projMatrix: mat4.create(),
+                textureIsOpaque: false,
             });
             this.currentGroup = '';
             this.smoothingGroup = 0;
@@ -180,6 +181,7 @@ export class ObjFile {
             vc19: [],
             vc29: [],
             projMatrix: mat4.create(),
+            textureIsOpaque: false,
         });
         this.currentGroup = '';
         this.smoothingGroup = 0;
@@ -221,18 +223,13 @@ export class ObjFile {
         const y = parseFloat(lineItems[2]);
         const z = parseFloat(lineItems[3]);
 
-        const nx = parseFloat(lineItems[4]);
-        const ny = parseFloat(lineItems[5]);
-        const nz = parseFloat(lineItems[6]);
+        const u = parseFloat(lineItems[4]);
+        const v = parseFloat(lineItems[5]);
 
-        const u = parseFloat(lineItems[7]);
-        const v = parseFloat(lineItems[8]);
-
-        const vdiff = parseInt(lineItems[9], 16);
-        const vspec = parseInt(lineItems[10], 16);
+        const vdiff = parseInt(lineItems[6], 16);
+        const vspec = parseInt(lineItems[7], 16);
 
         this.currentModel().vertices.push(x, y, z);
-        this.currentModel().vertexNormals.push(nx, ny, nz);
         this.currentModel().textureCoords.push(u, v);
         this.currentModel().vertexDiff.push(vdiff);
         if (hasSpec)
@@ -303,6 +300,10 @@ export class ObjFile {
     private parseUseMtl(lineItems: string[]) {
         if (lineItems.length >= 2) {
             this.currentMaterial = lineItems[1];
+            if (lineItems.length >= 3)
+                this.currentModel().textureIsOpaque = (lineItems[2] == "1");
+            else
+                this.currentModel().textureIsOpaque = true;
             this.result.materials.add(this.currentMaterial);
         }
     }
@@ -367,7 +368,9 @@ export function parseDump(obj: ObjResult): DumpChunk[] {
 
         let projMatrix = model.projMatrix;
 
-        dumpChunks.push({ name: model.name, vertexData, indexData: indices, textureName, drawType, vc17, vc18, vc19, vc29, projMatrix });
+        const textureIsOpaque = model.textureIsOpaque;
+
+        dumpChunks.push({ name: model.name, vertexData, indexData: indices, textureName, drawType, vc17, vc18, vc19, vc29, projMatrix, textureIsOpaque });
     }
 
     return dumpChunks;

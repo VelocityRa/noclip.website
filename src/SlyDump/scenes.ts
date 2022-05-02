@@ -1,8 +1,10 @@
 
+import ArrayBufferSlice from "../ArrayBufferSlice";
 import { DataFetcher, NamedArrayBufferSlice } from "../DataFetcher";
 import { GfxDevice, GfxFormat, GfxTexture, makeTextureDescriptor2D } from "../gfx/platform/GfxPlatform";
 import { SceneContext, SceneDesc, SceneGroup } from "../SceneBase";
 import { SceneGfx } from "../viewer";
+import { getFileFromZip, parseZipFile } from "../ZipFile";
 import { ObjFile, parseDump } from "./bin";
 import { Scene } from "./render";
 // import { Scene } from "./render";
@@ -29,13 +31,18 @@ function fetchImage(dataFetcher: DataFetcher, path: string): Promise<ImageData> 
 }
 
 export class SlyDumpSceneDesc implements SceneDesc {
-    constructor(public id: string, public name: string = id) {
+    constructor(public id: string, public name: string = id, private compressed: boolean = false) {
     }
 
     public async createScene(device: GfxDevice, sceneContext: SceneContext): Promise<SceneGfx> {
-        const objFileData = await sceneContext.dataFetcher.fetchData(`${pathBase}/${this.id}.obj`);
+        let objFileData: ArrayBufferSlice;
 
-        // const textureFiles = ZipFile.parseZipFile(await sceneContext.dataFetcher.fetchData(`${pathBase}/${this.id}.zip`));
+        if (this.compressed) {
+            const zip = parseZipFile(await sceneContext.dataFetcher.fetchData(`${pathBase}/${this.id}.zip`));
+            objFileData = getFileFromZip(zip, `${this.id}.obj`);
+        } else {
+            objFileData = await sceneContext.dataFetcher.fetchData(`${pathBase}/${this.id}.obj`);
+        }
 
         var dec = new TextDecoder("utf-8");
         const obj = new ObjFile(dec.decode(objFileData.createDataView())).parse();
@@ -46,7 +53,7 @@ export class SlyDumpSceneDesc implements SceneDesc {
                 continue;
             const texturePath = `${pathBase}/${this.id}/${materialName}.png`;
             try {
-                let imageData = await fetchImage(sceneContext.dataFetcher, texturePath);
+                const imageData = await fetchImage(sceneContext.dataFetcher, texturePath);
                 textures.set(materialName, imageData);
             } catch (e: unknown) {
                 console.error(e);
@@ -60,9 +67,9 @@ export class SlyDumpSceneDesc implements SceneDesc {
 }
 
 const sceneDescs = [
-    new SlyDumpSceneDesc('dump0'),
+    new SlyDumpSceneDesc('0', '5. Blood Bath Bay (from "Dead Men Tell No Tales")', true),
 ];
 
 const id = 'SlyDump';
-const name = "SlyDump";
+const name = "Sly 3: Honor Among Thieves";
 export const sceneGroup: SceneGroup = { id, name, sceneDescs };
