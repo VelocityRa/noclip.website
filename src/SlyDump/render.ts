@@ -43,6 +43,7 @@ layout(std140) uniform ub_ObjectParams {
     vec4 vc29;
     Mat4x4 u_GameProjectionMat;
     float u_DrawType; // TODO: specify at compile time
+    float u_Scale;
 };
 
 layout(binding = 0) uniform sampler2D u_Texture;
@@ -82,7 +83,7 @@ void mainVS() {
         v_Texcoord = texcoordOffset.xy + a_Texcoord;
     }
 
-    vec3 pos = a_Position.xzy * vec3(1.0, 1.0, -1.0);
+    vec3 pos = a_Position.xzy * vec3(u_Scale, u_Scale, -u_Scale);
     vec4 modelViewPos = Mul(u_ModelView, vec4(pos, 1.0));
 
     gl_Position = Mul(u_Projection, modelViewPos);
@@ -218,25 +219,6 @@ export class SlyDumpRenderer {
 
         const template = renderInstManager.pushTemplateRenderInst();
 
-        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4 + 4);
-        const d = template.mapUniformBufferF32(SlyDumpProgram.ub_ObjectParams);
-        offs += fillVec4v(d, offs, this.dumpChunk.vc17);
-        offs += fillVec4v(d, offs, this.dumpChunk.vc18);
-        // TODO
-        if (this.dumpChunk.drawType == 4.0) { // Normal2
-            // const fc160 = vec4.fromValues(0.08235, 0.33333, 0.58824, 1.00); // intro?
-            const fc160 = vec4.fromValues(0.09804, 0.08235, 0.07451, 1.00); // pirate
-            offs += fillVec4v(d, offs, fc160);
-        } else
-            offs += fillVec4v(d, offs, this.dumpChunk.vc19);
-        offs += fillVec4v(d, offs, this.dumpChunk.vc29);
-        offs += fillMatrix4x4(d, offs, this.dumpChunk.projMatrix);
-        offs += fillFloat(d, offs, this.dumpChunk.drawType);
-
-        if (this.textureMapping) {
-            template.setSamplerBindingsFromTextureMappings([this.textureMapping]);
-        }
-
         const isSkydome = (this.dumpChunk.name.endsWith("_clr:1_blk:2"));
 
         let rendererLayer: GfxRendererLayer;
@@ -250,6 +232,26 @@ export class SlyDumpRenderer {
             rendererLayer = GfxRendererLayer.TRANSLUCENT;
 
         template.sortKey = makeSortKey(rendererLayer);
+
+        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4 + 4 + 2);
+        const d = template.mapUniformBufferF32(SlyDumpProgram.ub_ObjectParams);
+        offs += fillVec4v(d, offs, this.dumpChunk.vc17);
+        offs += fillVec4v(d, offs, this.dumpChunk.vc18);
+        // TODO
+        if (this.dumpChunk.drawType == 4.0) { // Normal2
+            // const fc160 = vec4.fromValues(0.08235, 0.33333, 0.58824, 1.00); // intro?
+            const fc160 = vec4.fromValues(0.09804, 0.08235, 0.07451, 1.00); // pirate
+            offs += fillVec4v(d, offs, fc160);
+        } else
+            offs += fillVec4v(d, offs, this.dumpChunk.vc19);
+        offs += fillVec4v(d, offs, this.dumpChunk.vc29);
+        offs += fillMatrix4x4(d, offs, this.dumpChunk.projMatrix);
+        offs += fillFloat(d, offs, this.dumpChunk.drawType);
+        offs += fillFloat(d, offs, isSkydome ? 5.0 : 1.0);
+
+        if (this.textureMapping) {
+            template.setSamplerBindingsFromTextureMappings([this.textureMapping]);
+        }
 
         const renderInst = renderInstManager.newRenderInst();
         renderInst.setInputLayoutAndState(this.inputLayout, this.inputState);
