@@ -1,11 +1,11 @@
-import { vec3 } from 'gl-matrix';
+import { mat4, vec3 } from 'gl-matrix';
 
 import { DeviceProgram } from '../Program';
 import * as Viewer from '../viewer';
 import * as UI from '../ui';
 
 import { GfxDevice, GfxBufferUsage, GfxBuffer, GfxInputState, GfxFormat, GfxInputLayout, GfxProgram, GfxBindingLayoutDescriptor, GfxRenderPass, GfxBindings, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxInputLayoutBufferDescriptor, GfxCullMode, GfxBlendFactor, GfxBlendMode, GfxTexture, makeTextureDescriptor2D, GfxMipFilterMode, GfxTexFilterMode, GfxWrapMode } from '../gfx/platform/GfxPlatform';
-import { fillColor, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers';
+import { fillColor, fillFloat, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers';
 import { makeBackbufferDescSimple, pushAntialiasingPostProcessPass, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
 import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper';
@@ -42,6 +42,7 @@ layout(std140) uniform ub_ObjectParams {
     vec4 vc19;
     vec4 vc29;
     Mat4x4 u_GameProjectionMat;
+    float u_DrawType; // TODO: specify at compile time
 };
 
 layout(binding = 0) uniform sampler2D u_Texture;
@@ -76,21 +77,24 @@ void mainVS() {
     v_Spec = a_Spec * diffSpecMultiplier;
     v_AmbientColor = ambientColor.rgb;
 
-    vec4 modelViewPos = Mul(u_ModelView, vec4(a_Position, 1.0));
+    vec3 pos = a_Position.xzy * vec3(1.0, 1.0, -1.0);
+    vec4 modelViewPos = Mul(u_ModelView, vec4(pos, 1.0));
 
     gl_Position = Mul(u_Projection, modelViewPos);
 
-    vec4 gameVertexPosition = Mul(u_GameProjectionMat, modelViewPos);
-
+    // vec4 gameVertexPosition = Mul(u_GameProjectionMat, modelViewPos);
     // v_Depth = saturate((gameVertexPosition.z - vc29.x) * vc29.y) * vc29.w * 100.0;
     // v_Depth = (gameVertexPosition.z - vc29.x) / 1000.0;
     // v_Depth = gl_FragCoord.z * 1.0;
-    v_Depth = 0.0;
+    // v_Depth = 0.0;
 }
 #endif
 
 #ifdef FRAG
 float saturate(float x) {
+    return clamp(x, 0.0, 1.0);
+}
+vec4 saturate(vec4 x) {
     return clamp(x, 0.0, 1.0);
 }
 vec4 fma4(vec4 a, vec4 b, vec4 c) {
@@ -117,21 +121,31 @@ void mainPS() {
 	vec4 h3 = vec4(0.);
 
 	h1 = texture(SAMPLER_2D(u_Texture), v_Texcoord);
-	h2 = spec_color;
-	h2.rgb = ((h1 * h2) * 2.).rgb;
-	h0 = diff_color;
-	h1.x = vec4(dot(h1.rgb, fc80.rgb)).x;
-	// h0.a = ((h0 * h1) * 4.).a;
-	h0.a = h0.a * h1.a * 2.0;
 
-    // h3.a = v_Depth;
-	h3.a = depth;
+    if (u_DrawType == 1.0) { // Skydome
+        h0 = saturate(diff_color);
+        h0.xyz = ((h0 * h1) * 2.).xyz;
+        h0.w = ((h0 * h1) * 2.).w;
+        h1.xyz = v_AmbientColor - h0.rgb;
+        h2.w = depth;
+        h0.xyz = fma4(h2.wwww, h1, h0).xyz;
+    } else if (u_DrawType == 0.0) { // Normal
+        h2 = spec_color;
+        h2.rgb = ((h1 * h2) * 2.).rgb;
+        h0 = diff_color;
+        h1.x = vec4(dot(h1.rgb, fc80.rgb)).x;
+        // h0.a = ((h0 * h1) * 4.).a;
+        h0.a = h0.a * h1.a * 2.0;
 
-	h3.rgb = ((h0 * h1.xxxx) * 2.).rgb;
-	h1.rgb = fma4(h3.aaaa, -h2, h2).rgb;
-	h0.rgb = v_AmbientColor - h3.rgb;
-	h0.rgb = (fma4(h3.aaaa, h0, h3) / 2.).rgb;
-	h0.rgb = (fma4(h1, h2.aaaa, h0) * 2.).rgb;
+        // h3.a = v_Depth;
+        h3.a = depth;
+
+        h3.rgb = ((h0 * h1.xxxx) * 2.).rgb;
+        h1.rgb = fma4(h3.aaaa, -h2, h2).rgb;
+        h0.rgb = v_AmbientColor - h3.rgb;
+        h0.rgb = (fma4(h3.aaaa, h0, h3) / 2.).rgb;
+        h0.rgb = (fma4(h1, h2.aaaa, h0) * 2.).rgb;
+    }
 
     gl_FragColor = h0;
 }
@@ -193,13 +207,14 @@ export class SlyDumpRenderer {
 
         const template = renderInstManager.pushTemplateRenderInst();
 
-        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4);
+        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4 + 4);
         const d = template.mapUniformBufferF32(SlyDumpProgram.ub_ObjectParams);
         offs += fillVec4v(d, offs, this.dumpChunk.vc17);
         offs += fillVec4v(d, offs, this.dumpChunk.vc18);
         offs += fillVec4v(d, offs, this.dumpChunk.vc19);
         offs += fillVec4v(d, offs, this.dumpChunk.vc29);
         offs += fillMatrix4x4(d, offs, this.dumpChunk.projMatrix);
+        offs += fillFloat(d, offs, this.dumpChunk.drawType);
 
         if (this.textureMapping) {
             template.setSamplerBindingsFromTextureMappings([this.textureMapping]);
@@ -316,7 +331,6 @@ export class Scene implements Viewer.SceneGfx {
             blendDstFactor: GfxBlendFactor.OneMinusSrcAlpha,
         }));
 
-        // TODO: check if fog is different depending on this
         viewerInput.camera.setClipPlanes(10, 300000);
 
         let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_SceneParams, 32);

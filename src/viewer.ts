@@ -254,8 +254,14 @@ export class Viewer {
             statistics.lines.push(`Buffer Uploads: ${statisticsGroup.bufferUploadCount}`);
 
         const worldMatrix = this.camera.worldMatrix;
+        let r = quat.create();
+        mat4.getRotation(r, worldMatrix);
+        let axis = vec3.create();
+        let angle = quat.getAxisAngle(axis, r);
+        angle *= MathConstants.RAD_TO_DEG;
         const camPositionX = worldMatrix[12].toFixed(2), camPositionY = worldMatrix[13].toFixed(2), camPositionZ = worldMatrix[14].toFixed(2);
         statistics.lines.push(`Camera Position: ${camPositionX} ${camPositionY} ${camPositionZ}`);
+        statistics.lines.push(`Camera Rotation: (${axis[0].toFixed(2)} ${axis[1].toFixed(2)} ${axis[2].toFixed(2)}) ${angle.toFixed(2)}°`);
 
         const vendorInfo = this.gfxDevice.queryVendorInfo();
         statistics.lines.push(`Platform: ${vendorInfo.platformString}`);

@@ -36,6 +36,11 @@ export function fillColor(d: Float32Array, offs: number, c: Readonly<GfxColor>, 
     return 4;
 }
 
+export function fillFloat(d: Float32Array, offs: number, a: number): number {
+    d[offs] = a;
+    return 1;
+}
+
 // All of our matrices are row-major.
 export function fillMatrix4x4(d: Float32Array, offs: number, m: ReadonlyMat4): number {
     d[offs +  0] = m[0];

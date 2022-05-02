@@ -15,6 +15,7 @@ export interface DumpChunk {
     vertexData: VertexData;
     indexData: Uint16Array;
     textureName: string | null;
+    drawType: number;
     vc17: vec4;
     vc18: vec4;
     vc19: vec4;
@@ -46,6 +47,7 @@ interface ObjModel {
     // Sly data
     vertexDiff: number[];
     vertexSpec: number[];
+    drawType: number;
     vc17: number[];
     vc18: number[];
     vc19: number[];
@@ -112,7 +114,10 @@ export class ObjFile {
                     this.parseVertexNormal(lineItems);
                     break;
                 case 'v36':
-                    this.parseV36(lineItems);
+                    this.parseV36(lineItems, false);
+                    break;
+                case 'v36s':
+                    this.parseV36(lineItems, true);
                     break;
                 case 'vc':
                     this.parseVc(lineItems);
@@ -145,6 +150,7 @@ export class ObjFile {
                 faces: [],
                 vertexDiff: [],
                 vertexSpec: [],
+                drawType: 0,
                 vc17: [],
                 vc18: [],
                 vc19: [],
@@ -168,6 +174,7 @@ export class ObjFile {
             faces: [],
             vertexDiff: [],
             vertexSpec: [],
+            drawType: 0,
             vc17: [],
             vc18: [],
             vc19: [],
@@ -209,7 +216,7 @@ export class ObjFile {
         this.currentModel().vertexNormals.push(x, y, z);
     }
 
-    private parseV36(lineItems: string[]) {
+    private parseV36(lineItems: string[], hasSpec: boolean) {
         const x = parseFloat(lineItems[1]);
         const y = parseFloat(lineItems[2]);
         const z = parseFloat(lineItems[3]);
@@ -228,11 +235,15 @@ export class ObjFile {
         this.currentModel().vertexNormals.push(nx, ny, nz);
         this.currentModel().textureCoords.push(u, v);
         this.currentModel().vertexDiff.push(vdiff);
-        this.currentModel().vertexSpec.push(vspec);
+        if (hasSpec)
+            this.currentModel().vertexSpec.push(vspec);
     }
 
     private parseVc(lineItems: string[]) {
         let n = 1;
+
+        this.currentModel().drawType = parseInt(lineItems[n++]);
+
         this.currentModel().vc17.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
         this.currentModel().vc18.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
         this.currentModel().vc19.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
@@ -347,14 +358,16 @@ export function parseDump(obj: ObjResult): DumpChunk[] {
         // TODO: Simplification
         const textureName = model.faces.length > 0 ? model.faces[0].material : null;
 
-        const vc17 = vec4.fromValues(model.vc17[0],model.vc17[1],model.vc17[2],model.vc17[3]);
+        let drawType = model.drawType;
+
+        const vc17 = vec4.fromValues(model.vc17[0], model.vc17[1], model.vc17[2], model.vc17[3]);
         const vc18 = vec4.fromValues(model.vc18[0],model.vc18[1],model.vc18[2],model.vc18[3]);
         const vc19 = vec4.fromValues(model.vc19[0],model.vc19[1],model.vc19[2],model.vc19[3]);
         const vc29 = vec4.fromValues(model.vc29[0], model.vc29[1], model.vc29[2], model.vc29[3]);
 
         let projMatrix = model.projMatrix;
 
-        dumpChunks.push({ name: model.name, vertexData, indexData: indices, textureName, vc17, vc18, vc19, vc29, projMatrix });
+        dumpChunks.push({ name: model.name, vertexData, indexData: indices, textureName, drawType, vc17, vc18, vc19, vc29, projMatrix });
     }
 
     return dumpChunks;
