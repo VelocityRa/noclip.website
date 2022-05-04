@@ -68,6 +68,7 @@ export class SlyDumpSceneDesc implements SceneDesc {
 
 const sceneDescs = [
     new SlyDumpSceneDesc('0', '5. Blood Bath Bay (from "Dead Men Tell No Tales")', true),
+    new SlyDumpSceneDesc('1', 'testing', false),
 ];
 
 const id = 'SlyDump';

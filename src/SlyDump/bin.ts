@@ -9,6 +9,7 @@ export interface VertexData {
 }
 
 export interface DumpChunk {
+    index: number;
     name: string;
     vertexData: VertexData;
     indexData: Uint16Array;
@@ -17,7 +18,7 @@ export interface DumpChunk {
     drawType: number;
     vc17: vec4;
     vc18: vec4;
-    vc19: vec4;
+    vc19_ambientColor: vec4;
     vc29: vec4;
     projMatrix: mat4;
 }
@@ -49,7 +50,7 @@ interface ObjModel {
     drawType: number;
     vc17: number[];
     vc18: number[];
-    vc19: number[];
+    vc19_ambientColor: number[];
     vc29: number[];
     projMatrix: mat4;
     textureIsOpaque: boolean;
@@ -153,7 +154,7 @@ export class ObjFile {
                 drawType: 0,
                 vc17: [],
                 vc18: [],
-                vc19: [],
+                vc19_ambientColor: [],
                 vc29: [],
                 projMatrix: mat4.create(),
                 textureIsOpaque: false,
@@ -178,7 +179,7 @@ export class ObjFile {
             drawType: 0,
             vc17: [],
             vc18: [],
-            vc19: [],
+            vc19_ambientColor: [],
             vc29: [],
             projMatrix: mat4.create(),
             textureIsOpaque: false,
@@ -243,7 +244,7 @@ export class ObjFile {
 
         this.currentModel().vc17.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
         this.currentModel().vc18.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
-        this.currentModel().vc19.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
+        this.currentModel().vc19_ambientColor.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
         this.currentModel().vc29.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
 
         this.currentModel().projMatrix = mat4.fromValues(
@@ -363,14 +364,16 @@ export function parseDump(obj: ObjResult): DumpChunk[] {
 
         const vc17 = vec4.fromValues(model.vc17[0], model.vc17[1], model.vc17[2], model.vc17[3]);
         const vc18 = vec4.fromValues(model.vc18[0],model.vc18[1],model.vc18[2],model.vc18[3]);
-        const vc19 = vec4.fromValues(model.vc19[0],model.vc19[1],model.vc19[2],model.vc19[3]);
+        const vc19_ambientColor = vec4.fromValues(model.vc19_ambientColor[0], model.vc19_ambientColor[1], model.vc19_ambientColor[2], model.vc19_ambientColor[3]);
         const vc29 = vec4.fromValues(model.vc29[0], model.vc29[1], model.vc29[2], model.vc29[3]);
 
         let projMatrix = model.projMatrix;
 
         const textureIsOpaque = model.textureIsOpaque;
 
-        dumpChunks.push({ name: model.name, vertexData, indexData: indices, textureName, drawType, vc17, vc18, vc19, vc29, projMatrix, textureIsOpaque });
+        const index = parseInt(model.name.split("_", 1)[0]);
+
+        dumpChunks.push({ index, name: model.name, vertexData, indexData: indices, textureName, drawType, vc17, vc18, vc19_ambientColor, vc29, projMatrix, textureIsOpaque });
     }
 
     return dumpChunks;

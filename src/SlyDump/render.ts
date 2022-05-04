@@ -1,3 +1,4 @@
+import {GfxCompareMode, GfxFrontFaceMode} from '../gfx/platform/GfxPlatform';
 import { mat4, vec3, vec4 } from 'gl-matrix';
 
 import { DeviceProgram } from '../Program';
@@ -9,7 +10,7 @@ import { fillColor, fillFloat, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx
 import { makeBackbufferDescSimple, pushAntialiasingPostProcessPass, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
 import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper';
-import { GfxRendererLayer, GfxRenderInstManager, makeSortKey } from '../gfx/render/GfxRenderInstManager';
+import { GfxRendererLayer, GfxRenderInstManager, makeSortKey, setSortKeyLayer } from '../gfx/render/GfxRenderInstManager';
 import { CameraController } from '../Camera';
 import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph';
 import { Red } from '../Color';
@@ -18,6 +19,7 @@ import { setAttachmentStateSimple } from '../gfx/helpers/GfxMegaStateDescriptorH
 import { interactiveVizSliderSelect } from '../DebugJunk';
 import { TextureMapping } from '../TextureHolder';
 import { DataFetcher } from '../DataFetcher';
+import { reverseDepthForCompareMode } from '../gfx/helpers/ReversedDepthHelpers';
 class SlyDumpProgram extends DeviceProgram {
     public static a_Position = 0;
     public static a_Normal = 1;
@@ -39,11 +41,10 @@ layout(std140) uniform ub_SceneParams {
 layout(std140) uniform ub_ObjectParams {
     vec4 vc17;
     vec4 vc18;
-    vec4 vc19;
+    vec4 u_AmbientColor; // vc19
     vec4 vc29;
     Mat4x4 u_GameProjectionMat;
     float u_DrawType; // TODO: specify at compile time
-    float u_Scale;
 };
 
 layout(binding = 0) uniform sampler2D u_Texture;
@@ -69,13 +70,11 @@ float saturate(float x) {
 void mainVS() {
     vec4 diffSpecMultiplier = vc17;
     vec4 texcoordOffset = vc18;
-    vec4 ambientColor = vc19;
-    // vec4 vc29 = vc29;
 
     v_Normal = a_Normal;
     v_Diff = a_Diff * diffSpecMultiplier;
     v_Spec = a_Spec * diffSpecMultiplier;
-    v_AmbientColor = ambientColor.rgb;
+    v_AmbientColor = u_AmbientColor.rgb;
 
     if (u_DrawType == 4.0) { // Normal2
         v_Texcoord = a_Texcoord;
@@ -83,7 +82,7 @@ void mainVS() {
         v_Texcoord = texcoordOffset.xy + a_Texcoord;
     }
 
-    vec3 pos = a_Position.xzy * vec3(u_Scale, u_Scale, -u_Scale);
+    vec3 pos = a_Position.xzy * vec3(1.0, 1.0, -1.0);
     vec4 modelViewPos = Mul(u_ModelView, vec4(pos, 1.0));
 
     gl_Position = Mul(u_Projection, modelViewPos);
@@ -109,7 +108,7 @@ vec4 fma4(vec4 a, vec4 b, vec4 c) {
 
 void mainPS() {
     // float originalZ = gl_FragCoord.z / gl_FragCoord.w;
-    float c = gl_FragCoord.z * 1100.0;
+    float c = pow(gl_FragCoord.z * 500.0, .85);
     float depth = clamp(1.0 - c, 0.05, 0.7);
 
     // gl_FragColor = vec4(c, c, c, 1.0); return;
@@ -231,23 +230,27 @@ export class SlyDumpRenderer {
         else
             rendererLayer = GfxRendererLayer.TRANSLUCENT;
 
-        template.sortKey = makeSortKey(rendererLayer);
+        template.sortKey = this.dumpChunk.index;
 
-        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4 + 4 + 2);
+        template.getMegaStateFlags().cullMode = this.dumpChunk.textureIsOpaque ? GfxCullMode.Back : GfxCullMode.None;
+        template.getMegaStateFlags().depthWrite = !isSkydome;
+        template.getMegaStateFlags().depthCompare = reverseDepthForCompareMode(isSkydome ? GfxCompareMode.Always : GfxCompareMode.Less);
+        template.getMegaStateFlags().frontFace = GfxFrontFaceMode.CCW; // isSkydome ? GfxFrontFaceMode.CW : GfxFrontFaceMode.CCW;
+
+        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4 + 4 + 1);
         const d = template.mapUniformBufferF32(SlyDumpProgram.ub_ObjectParams);
         offs += fillVec4v(d, offs, this.dumpChunk.vc17);
         offs += fillVec4v(d, offs, this.dumpChunk.vc18);
         // TODO
         if (this.dumpChunk.drawType == 4.0) { // Normal2
-            // const fc160 = vec4.fromValues(0.08235, 0.33333, 0.58824, 1.00); // intro?
-            const fc160 = vec4.fromValues(0.09804, 0.08235, 0.07451, 1.00); // pirate
+            const fc160 = vec4.fromValues(0.08235, 0.33333, 0.58824, 1.00); // intro?
+            // const fc160 = vec4.fromValues(0.09804, 0.08235, 0.07451, 1.00); // pirate
             offs += fillVec4v(d, offs, fc160);
         } else
-            offs += fillVec4v(d, offs, this.dumpChunk.vc19);
+            offs += fillVec4v(d, offs, this.dumpChunk.vc19_ambientColor);
         offs += fillVec4v(d, offs, this.dumpChunk.vc29);
         offs += fillMatrix4x4(d, offs, this.dumpChunk.projMatrix);
         offs += fillFloat(d, offs, this.dumpChunk.drawType);
-        offs += fillFloat(d, offs, isSkydome ? 5.0 : 1.0);
 
         if (this.textureMapping) {
             template.setSamplerBindingsFromTextureMappings([this.textureMapping]);
@@ -357,14 +360,14 @@ export class Scene implements Viewer.SceneGfx {
         template.setBindingLayouts(bindingLayouts);
         template.setGfxProgram(this.program);
         template.setMegaStateFlags(setAttachmentStateSimple({
-            cullMode: GfxCullMode.None,
+            cullMode: GfxCullMode.Back,
         }, {
             blendMode: GfxBlendMode.Add,
             blendSrcFactor: GfxBlendFactor.SrcAlpha,
             blendDstFactor: GfxBlendFactor.OneMinusSrcAlpha,
         }));
 
-        viewerInput.camera.setClipPlanes(10, 300000);
+        viewerInput.camera.setClipPlanes(20, 400000);
 
         let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_SceneParams, 32);
         const mapped = template.mapUniformBufferF32(SlyDumpProgram.ub_SceneParams);
