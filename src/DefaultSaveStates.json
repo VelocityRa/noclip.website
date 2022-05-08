@@ -6260,6 +6260,7 @@
     "SaveState_nfsmw/rockport/5": "ShareData=ASRv29XBqHUFTme9rLJN=c:c)6jQfUUd:beUG(jHVj5;@UuZ$(T0r)j9K}jAWP",
     "SaveState_nfsmw/rockport/6": "ShareData=AVd2!Usif!9OL*MUkwM&=UR|M6I5M0UX;gIUU&y6V1]Ed93^Cc9YGxNUuNXu+^",
 <<<<<<< HEAD
+<<<<<<< HEAD
     "SaveState_supermonkeyball/st124/1": "ShareData=ARU6IUknTk8^4-+UVEtvU{Lf,P3XPSUV$cLUKGFyU)8[C9GMkr9Nt2]Up(f@U!",
     "SaveState_supermonkeyball/st011/1": "ShareData=AE0s2UcE2;UE3ca9kp~?+V!}U5^5BmUi!AFUeOv?VQ$[jUrEkm9QQisUt!9mU!",
     "SaveState_supermonkeyball/st102/1": "ShareData=AHO+)UpC2Z8]VttT(rEUU?8L~P0]vLUr7,eUQz=$VE/Pn8&Hfu9aLycUetO&U!",
@@ -6468,4 +6469,8 @@
     "SaveState_SlyDump/0/1": "ShareData=AEI3OT(@,C8-$vmUu$2r=!+R5RRXO7Ub3?rT=!sG=HUa@9jiAB9A)eST(^5!=a",
     "SaveState_SlyDump/1/1": "ShareData=ALhj}UadEI8@pz=UEI48XJM3u6U_}YUvR*gUQBDrWN$k_9es[k9P*r9UpC1v={"
 >>>>>>> fe876e55 (better sorting, depth handling, cull mode, etc)
+=======
+    "SaveState_SlyDump/0/1": "ShareData=AIH05Uf5WATOPev9I(zFW+nM66e9waUYKAfTk~!X=i:&QUQbsY8pfwsUc!mk={",
+    "SaveState_SlyDump/1/1": "ShareData=AX1bsUDW8)8!zY8Up}eH-J*-yRY|GMUZOmLT;sc5=5scP9ub4u87OtQUK=Yv=2"
+>>>>>>> 54f14022 (material stuff)
 }

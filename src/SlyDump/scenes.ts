@@ -7,7 +7,6 @@ import { SceneGfx } from "../viewer";
 import { getFileFromZip, parseZipFile } from "../ZipFile";
 import { ObjFile, parseDump } from "./bin";
 import { Scene } from "./render";
-// import { Scene } from "./render";
 
 const pathBase = `SlyDump`;
 
@@ -67,8 +66,9 @@ export class SlyDumpSceneDesc implements SceneDesc {
 }
 
 const sceneDescs = [
-    new SlyDumpSceneDesc('0', '5. Blood Bath Bay (from "Dead Men Tell No Tales")', true),
-    new SlyDumpSceneDesc('1', 'testing', false),
+    new SlyDumpSceneDesc('0', '0. Prologue', true),
+    new SlyDumpSceneDesc('1', '5. Blood Bath Bay (from "Dead Men Tell No Tales")', true),
+    new SlyDumpSceneDesc('2', 'testing', false),
 ];
 
 const id = 'SlyDump';
