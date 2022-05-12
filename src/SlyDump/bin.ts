@@ -16,6 +16,7 @@ export interface DumpChunk {
     textureName: string | null;
     textureIsOpaque: boolean;
     drawType: number;
+    transformBranchBits: number;
     vc17: vec4;
     vc18: vec4;
     vc19_ambientColor: vec4;
@@ -48,6 +49,7 @@ interface ObjModel {
     vertexDiff: number[];
     vertexSpec: number[];
     drawType: number;
+    transformBranchBits: number;
     vc17: number[];
     vc18: number[];
     vc19_ambientColor: number[];
@@ -152,6 +154,7 @@ export class ObjFile {
                 vertexDiff: [],
                 vertexSpec: [],
                 drawType: 0,
+                transformBranchBits: 0,
                 vc17: [],
                 vc18: [],
                 vc19_ambientColor: [],
@@ -177,6 +180,7 @@ export class ObjFile {
             vertexDiff: [],
             vertexSpec: [],
             drawType: 0,
+            transformBranchBits: 0,
             vc17: [],
             vc18: [],
             vc19_ambientColor: [],
@@ -241,6 +245,7 @@ export class ObjFile {
         let n = 1;
 
         this.currentModel().drawType = parseInt(lineItems[n++]);
+        this.currentModel().transformBranchBits = parseInt(lineItems[n++], 16);
 
         this.currentModel().vc17.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
         this.currentModel().vc18.push(parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]), parseFloat(lineItems[n++]));
@@ -361,6 +366,7 @@ export function parseDump(obj: ObjResult): DumpChunk[] {
         const textureName = model.faces.length > 0 ? model.faces[0].material : null;
 
         let drawType = model.drawType;
+        let transformBranchBits = model.transformBranchBits;
 
         const vc17 = vec4.fromValues(model.vc17[0], model.vc17[1], model.vc17[2], model.vc17[3]);
         const vc18 = vec4.fromValues(model.vc18[0],model.vc18[1],model.vc18[2],model.vc18[3]);
@@ -373,7 +379,10 @@ export function parseDump(obj: ObjResult): DumpChunk[] {
 
         const index = parseInt(model.name.split("_", 1)[0]);
 
-        dumpChunks.push({ index, name: model.name, vertexData, indexData: indices, textureName, drawType, vc17, vc18, vc19_ambientColor, vc29, projMatrix, textureIsOpaque });
+        dumpChunks.push({
+            index, name: model.name, vertexData, indexData: indices, textureName, drawType,
+            transformBranchBits, vc17, vc18, vc19_ambientColor, vc29, projMatrix, textureIsOpaque
+        });
     }
 
     return dumpChunks;

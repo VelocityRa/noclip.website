@@ -41,11 +41,12 @@ layout(std140) uniform ub_SceneParams {
 
 layout(std140) uniform ub_ObjectParams {
     vec4 vc17;
-    vec4 vc18;
+    vec4 u_TexcoordOffset; // vc18
     vec4 u_AmbientColor; // vc19
     vec4 vc29;
     Mat4x4 u_GameProjectionMat;
     float u_DrawType; // TODO: specify at compile time
+    float u_TransformBranchBits;
 };
 
 layout(binding = 0) uniform sampler2D u_Texture;
@@ -77,29 +78,18 @@ float saturate(float x) {
 
 void mainVS() {
     vec4 diffSpecMultiplier = vc17;
-    vec4 texcoordOffset = vc18;
 
     v_Normal = a_Normal;
     v_Diff = a_Diff * diffSpecMultiplier;
     v_Spec = a_Spec * diffSpecMultiplier;
     v_AmbientColor = u_AmbientColor.rgb;
-
-    if (u_DrawType == M_Normal2) {
-        v_Texcoord = a_Texcoord;
-    } else {
-        v_Texcoord = texcoordOffset.xy + a_Texcoord;
-    }
+    v_Texcoord = u_TexcoordOffset.xy + a_Texcoord;
 
     vec3 pos = a_Position.xzy * vec3(1.0, 1.0, -1.0);
     vec4 modelViewPos = Mul(u_ModelView, vec4(pos, 1.0));
 
     gl_Position = Mul(u_Projection, modelViewPos);
-
-    // vec4 gameVertexPosition = Mul(u_GameProjectionMat, modelViewPos);
-    // v_Depth = saturate((gameVertexPosition.z - vc29.x) * vc29.y) * vc29.w * 100.0;
-    // v_Depth = (gameVertexPosition.z - vc29.x) / 1000.0;
-    // v_Depth = gl_FragCoord.z * 1.0;
-    // v_Depth = 0.0;
+    v_Depth = saturate(((1.0 - gl_Position.z) - vc29.x) * vc29.y) * vc29.w;
 }
 #endif
 
@@ -115,10 +105,6 @@ vec4 fma4(vec4 a, vec4 b, vec4 c) {
 }
 
 void mainPS() {
-    // float originalZ = gl_FragCoord.z / gl_FragCoord.w;
-    float c = pow(gl_FragCoord.z * 500.0, .85);
-    float depth = clamp(1.0 - c, 0.05, 0.7);
-
     // gl_FragColor = vec4(c, c, c, 1.0); return;
     // gl_FragColor = vec4(v_Depth, v_Depth, v_Depth, 1.0); return;
 
@@ -126,7 +112,7 @@ void mainPS() {
     vec4 spec_color = v_Spec;
 
     // TODO
-    vec4 fc80 = vec4(0.30, 0.59, 0.11, 0.0);
+    const vec4 fc80 = vec4(0.30, 0.59, 0.11, 0.0); // used in Normal, Skeletal, Water
 
     vec4 h0 = vec4(0.);
     vec4 h1 = vec4(0.);
@@ -141,40 +127,62 @@ void mainPS() {
     // gl_FragColor = diff_color; gl_FragColor.a = 1.0; return;
     // gl_FragColor = diff_color.aaaa; gl_FragColor.a = 1.0; return;
 
-    if (    u_DrawType == M_Normal ||
-            u_DrawType == M_Normal2||
-            u_DrawType == M_Skeletal) {
+    // if (u_DrawType == M_Normal2) {
+    //     gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); return;
+    // } else {
+    //     gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); return;
+    // }
+
+    // if (u_DrawType == M_Skeletal || u_DrawType == M_Water) {
+    //     bool is_skinned = ((int(u_TransformBranchBits) & 0x110) != 0);
+    //     bool is_lighting = ((int(u_TransformBranchBits) & 0x10) != 0);
+    //     gl_FragColor = vec4(is_skinned ? 1.0 : 0.0, is_lighting ? 1.0 : 0.0, 0.0, 1.0);
+    //     return;
+    // } else {
+    //     gl_FragColor = vec4(0.0, 0.0, 1.0, 1.0);
+    //     return;
+    // }
+
+    // HACKY
+    if (u_DrawType == M_Skeletal || u_DrawType == M_Water) {
+        bool is_lighting = ((int(u_TransformBranchBits) & 0x10) != 0);
+        if (is_lighting) {
+            // gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); return;
+
+            spec_color = vec4(0.26, 0.26, 0.26, 0.5);
+            diff_color = vec4(0.26, 0.26, 0.26, 0.5);
+        }
+    }
+
+
+    if (    u_DrawType == M_Normal  ||
+            u_DrawType == M_Normal2 ||
+            u_DrawType == M_Skeletal||
+            u_DrawType == M_Water) {
         h1 = tex;
         h2 = spec_color;
         h2.rgb = ((h1 * h2) * 2.).rgb;
         h0 = saturate(diff_color);
+        h0.a = h0.a * h1.a * 2.0;  // actual shader does * 4 but we * 2 at dump time
         h1.x = vec4(dot(h1.rgb, fc80.rgb)).x;
-        // h0.a = ((h0 * h1) * 4.).a;
-        h0.a = h0.a * h1.a * 2.0;
 
-        // h3.a = v_Depth;
-        h3.a = depth;
-
-        h3.rgb = ((h0 * h1.xxxx) * 2.).rgb;
-        h1.rgb = fma4(h3.aaaa, -h2, h2).rgb;
+        h3.rgb = h0.rgb * h1.xxx * 2.;
+        h1.rgb = h2.rgb - vec3(v_Depth) * h2.rgb;
         h0.rgb = v_AmbientColor - h3.rgb;
-        h0.rgb = (fma4(h3.aaaa, h0, h3) / 2.).rgb;
-        h0.rgb = (fma4(h1, h2.aaaa, h0) * 2.).rgb;
+        h0.rgb = (v_Depth * h0.rgb + h3.rgb) / 2.;
+        h0.rgb = (h1.rgb * h2.aaa + h0.rgb) * 2.;
     } else if (u_DrawType == M_Nospec ||
                u_DrawType == M_Skydome) {
         h1 = tex;
         h0 = saturate(diff_color);
-        h0.xyz = ((h0 * h1) * 2.).xyz;
-        h0.w = ((h0 * h1) * 2.).w;
+        h0 = h0 * h1 * 2.; // actual shader does * 4 to alpha but we * 2 at dump time
         h1.xyz = v_AmbientColor - h0.rgb;
-        h2.w = depth;
+        h2.w = v_Depth;
         h0.xyz = fma4(h2.wwww, h1, h0).xyz;
-    } else if (u_DrawType == M_Water) {
-        h0 = tex;
-        h1 = saturate(diff_color);
-        h0 = h1 * h0 * 2.;
-    // } else if (u_DrawType == M_Skeletal) {
+    // } else if (u_DrawType == M_Water) {
     //     h0 = tex;
+    //     h1 = saturate(diff_color);
+    //     h0 = h1 * h0 * 2.; // actual shader does * 4 to alpha but we * 2 at dump time
     } else {
         h0 = vec4(1.0, 0.0, 0.0, 1.0);
     }
@@ -256,10 +264,16 @@ export class SlyDumpRenderer {
         // template.getMegaStateFlags().frontFace = isSkydome ? GfxFrontFaceMode.CW : GfxFrontFaceMode.CCW;
         template.getMegaStateFlags().frontFace = GfxFrontFaceMode.CCW;
 
-        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4 + 4 + 1);
+        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4 + 4 + 1 + 1);
         const d = template.mapUniformBufferF32(SlyDumpProgram.ub_ObjectParams);
         offs += fillVec4v(d, offs, this.dumpChunk.vc17);
-        offs += fillVec4v(d, offs, this.dumpChunk.vc18);
+
+        // TODO: is this right? doesn't make sense, normal 2 is used for waves
+        if (this.dumpChunk.drawType == 5.0) { // Normal2
+            offs += fillVec4v(d, offs, vec4.create());
+        } else {
+            offs += fillVec4v(d, offs, this.dumpChunk.vc18);
+        }
 
         if (this.dumpChunk.drawType == 5.0) { // Normal2
             let fc160: vec4;
@@ -274,6 +288,7 @@ export class SlyDumpRenderer {
         offs += fillVec4v(d, offs, this.dumpChunk.vc29);
         offs += fillMatrix4x4(d, offs, this.dumpChunk.projMatrix);
         offs += fillFloat(d, offs, this.dumpChunk.drawType);
+        offs += fillFloat(d, offs, this.dumpChunk.transformBranchBits);
 
         if (this.textureMapping) {
             template.setSamplerBindingsFromTextureMappings([this.textureMapping]);
@@ -375,7 +390,7 @@ export class Scene implements Viewer.SceneGfx {
     }
 
     public adjustCameraController(c: CameraController) {
-        c.setSceneMoveSpeedMult(0.7);
+        c.setSceneMoveSpeedMult(0.6);
     }
 
     private prepareToRender(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput): void {
