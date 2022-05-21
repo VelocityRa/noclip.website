@@ -133,6 +133,7 @@ void mainPS() {
     // gl_FragColor.rgb = v_AmbientColor; gl_FragColor.a = 1.0; return;
     // gl_FragColor = u_fc80; gl_FragColor.a = 1.0; return;
     // gl_FragColor = u_fc160; gl_FragColor.a = 1.0; return;
+    // gl_FragColor.rgb = v_Normal; gl_FragColor.a = 1.0; return;
 
     // if (u_DrawType == M_Normal2) {
     //     gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); return;

@@ -43,7 +43,7 @@ interface ObjModel {
     name: string;
     vertices: number[];
     textureCoords: number[];
-    vertexNormals: number[];
+    normals: number[];
     faces: ObjFace[];
 
     // Sly data
@@ -119,10 +119,13 @@ export class ObjFile {
                     this.parseVertexNormal(lineItems);
                     break;
                 case 'v36':
-                    this.parseV36(lineItems, false);
+                    this.parseV36(lineItems, false, false);
                     break;
                 case 'v36s':
-                    this.parseV36(lineItems, true);
+                    this.parseV36(lineItems, false, true);
+                    break;
+                case 'v36sn':
+                    this.parseV36(lineItems, true, true);
                     break;
                 case 'vc':
                     this.parseVc(lineItems);
@@ -154,7 +157,7 @@ export class ObjFile {
                 name: this.defaultModelName,
                 vertices: [],
                 textureCoords: [],
-                vertexNormals: [],
+                normals: [],
                 faces: [],
                 vertexDiff: [],
                 vertexSpec: [],
@@ -181,7 +184,7 @@ export class ObjFile {
             name: modelName,
             vertices: [],
             textureCoords: [],
-            vertexNormals: [],
+            normals: [],
             faces: [],
             vertexDiff: [],
             vertexSpec: [],
@@ -227,19 +230,28 @@ export class ObjFile {
         const y = lineItems.length >= 3 ? parseFloat(lineItems[2]) : 0.0;
         const z = lineItems.length >= 4 ? parseFloat(lineItems[3]) : 0.0;
 
-        this.currentModel().vertexNormals.push(x, y, z);
+        this.currentModel().normals.push(x, y, z);
     }
 
-    private parseV36(lineItems: string[], hasSpec: boolean) {
-        const x = parseFloat(lineItems[1]);
-        const y = parseFloat(lineItems[2]);
-        const z = parseFloat(lineItems[3]);
+    private parseV36(lineItems: string[], hasNormal: boolean, hasSpec: boolean) {
+        let n = 1;
 
-        const u = parseFloat(lineItems[4]);
-        const v = parseFloat(lineItems[5]);
+        const x = parseFloat(lineItems[n++]);
+        const y = parseFloat(lineItems[n++]);
+        const z = parseFloat(lineItems[n++]);
 
-        const vdiff = parseInt(lineItems[6], 16);
-        const vspec = parseInt(lineItems[7], 16);
+        if (hasNormal) {
+            const nx = parseFloat(lineItems[n++]);
+            const ny = parseFloat(lineItems[n++]);
+            const nz = parseFloat(lineItems[n++]);
+            this.currentModel().normals.push(nx, ny, nz);
+        }
+
+        const u = parseFloat(lineItems[n++]);
+        const v = parseFloat(lineItems[n++]);
+
+        const vdiff = parseInt(lineItems[n++], 16);
+        const vspec = parseInt(lineItems[n++], 16);
 
         this.currentModel().vertices.push(x, y, z);
         this.currentModel().textureCoords.push(u, v);
@@ -368,7 +380,7 @@ export function parseDump(obj: ObjResult): DumpChunk[] {
 
         const vertexData: VertexData = {
             positions: Float32Array.from(model.vertices),
-            normals: Float32Array.from(model.vertexNormals),
+            normals: Float32Array.from(model.normals),
             texcoords: Float32Array.from(model.textureCoords),
             diff: diffArray,
             spec: specArray
