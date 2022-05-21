@@ -36,6 +36,7 @@ export function fillColor(d: Float32Array, offs: number, c: Readonly<GfxColor>, 
     return 4;
 }
 
+// NOTE: Make sure to manually align/pad to 4 after using this
 export function fillFloat(d: Float32Array, offs: number, a: number): number {
     d[offs] = a;
     return 1;

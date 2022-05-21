@@ -21,6 +21,7 @@ import { TextureMapping } from '../TextureHolder';
 import { DataFetcher } from '../DataFetcher';
 import { reverseDepthForCompareMode } from '../gfx/helpers/ReversedDepthHelpers';
 import { sceneGroup } from './scenes';
+import { assert } from '../util';
 class SlyDumpProgram extends DeviceProgram {
     public static a_Position = 0;
     public static a_Normal = 1;
@@ -43,10 +44,12 @@ layout(std140) uniform ub_ObjectParams {
     vec4 vc17;
     vec4 u_TexcoordOffset; // vc18
     vec4 u_AmbientColor; // vc19
-    vec4 vc29;
+    vec4 u_gVecFogParams; // vc29
     Mat4x4 u_GameProjectionMat;
     float u_DrawType; // TODO: specify at compile time
     float u_TransformBranchBits;
+    vec4 u_fc80;
+    vec4 u_fc160;
 };
 
 layout(binding = 0) uniform sampler2D u_Texture;
@@ -82,14 +85,18 @@ void mainVS() {
     v_Normal = a_Normal;
     v_Diff = a_Diff * diffSpecMultiplier;
     v_Spec = a_Spec * diffSpecMultiplier;
-    v_AmbientColor = u_AmbientColor.rgb;
+    if (u_DrawType == M_Normal2) {
+        v_AmbientColor = u_fc160.rgb;
+    } else {
+        v_AmbientColor = u_AmbientColor.rgb;
+    }
     v_Texcoord = u_TexcoordOffset.xy + a_Texcoord;
 
     vec3 pos = a_Position.xzy * vec3(1.0, 1.0, -1.0);
     vec4 modelViewPos = Mul(u_ModelView, vec4(pos, 1.0));
 
     gl_Position = Mul(u_Projection, modelViewPos);
-    v_Depth = saturate(((1.0 - gl_Position.z) - vc29.x) * vc29.y) * vc29.w;
+    v_Depth = saturate(((1.0 - gl_Position.z) - u_gVecFogParams.x) * u_gVecFogParams.y) * u_gVecFogParams.w;
 }
 #endif
 
@@ -111,9 +118,6 @@ void mainPS() {
     vec4 diff_color = v_Diff;
     vec4 spec_color = v_Spec;
 
-    // TODO
-    const vec4 fc80 = vec4(0.30, 0.59, 0.11, 0.0); // used in Normal, Skeletal, Water
-
     vec4 h0 = vec4(0.);
     vec4 h1 = vec4(0.);
 	vec4 h2 = vec4(0.);
@@ -126,11 +130,19 @@ void mainPS() {
     // gl_FragColor = spec_color.aaaa; gl_FragColor.a = 1.0; return;
     // gl_FragColor = diff_color; gl_FragColor.a = 1.0; return;
     // gl_FragColor = diff_color.aaaa; gl_FragColor.a = 1.0; return;
+    // gl_FragColor.rgb = v_AmbientColor; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = u_fc80; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = u_fc160; gl_FragColor.a = 1.0; return;
 
     // if (u_DrawType == M_Normal2) {
     //     gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); return;
     // } else {
     //     gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); return;
+    // }
+
+    // if (u_DrawType == M_Water) {
+    //     gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+    //     return;
     // }
 
     // if (u_DrawType == M_Skeletal || u_DrawType == M_Water) {
@@ -154,7 +166,6 @@ void mainPS() {
         }
     }
 
-
     if (    u_DrawType == M_Normal  ||
             u_DrawType == M_Normal2 ||
             u_DrawType == M_Skeletal||
@@ -164,7 +175,7 @@ void mainPS() {
         h2.rgb = ((h1 * h2) * 2.).rgb;
         h0 = saturate(diff_color);
         h0.a = h0.a * h1.a * 2.0;  // actual shader does * 4 but we * 2 at dump time
-        h1.x = vec4(dot(h1.rgb, fc80.rgb)).x;
+        h1.x = vec4(dot(h1.rgb, u_fc80.rgb)).x;
 
         h3.rgb = h0.rgb * h1.xxx * 2.;
         h1.rgb = h2.rgb - vec3(v_Depth) * h2.rgb;
@@ -264,7 +275,7 @@ export class SlyDumpRenderer {
         // template.getMegaStateFlags().frontFace = isSkydome ? GfxFrontFaceMode.CW : GfxFrontFaceMode.CCW;
         template.getMegaStateFlags().frontFace = GfxFrontFaceMode.CCW;
 
-        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4 + 4 + 1 + 1);
+        let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_ObjectParams, 4*4 + 4*4 + 4 + 1 + 1 + 4 + 4);
         const d = template.mapUniformBufferF32(SlyDumpProgram.ub_ObjectParams);
         offs += fillVec4v(d, offs, this.dumpChunk.vc17);
 
@@ -276,19 +287,24 @@ export class SlyDumpRenderer {
         }
 
         if (this.dumpChunk.drawType == 5.0) { // Normal2
-            let fc160: vec4;
-            if (window.main.saveManager.getCurrentSceneDescId() == "SlyDump/0") {
-                fc160 = vec4.fromValues(0.08235, 0.33333, 0.58824, 1.00); // intro?
-            } else {
-                fc160 = vec4.fromValues(0.09804, 0.08235, 0.07451, 1.00); // pirate
-            }
-            offs += fillVec4v(d, offs, fc160);
+            // const fc160 = this.dumpChunk.fc.get(160)!;
+            // offs += fillVec4v(d, offs, fc160);
+            offs += fillVec4(d, offs, 1.0, 0.0, 0.0, 1.0); // dummy
         } else
             offs += fillVec4v(d, offs, this.dumpChunk.vc19_ambientColor);
         offs += fillVec4v(d, offs, this.dumpChunk.vc29);
         offs += fillMatrix4x4(d, offs, this.dumpChunk.projMatrix);
         offs += fillFloat(d, offs, this.dumpChunk.drawType);
         offs += fillFloat(d, offs, this.dumpChunk.transformBranchBits);
+        offs += 2; // align
+        if (this.dumpChunk.fc.get(80) !== undefined)
+            offs += fillVec4v(d, offs, this.dumpChunk.fc.get(80)!);
+        else
+            offs += fillVec4(d, offs, 1.0, 0.0, 0.0, 1.0); // dummy
+        if (this.dumpChunk.fc.get(160) !== undefined)
+            offs += fillVec4v(d, offs, this.dumpChunk.fc.get(160)!);
+        else
+            offs += fillVec4(d, offs, 0.0, 0.0, 1.0, 1.0); // dummy
 
         if (this.textureMapping) {
             template.setSamplerBindingsFromTextureMappings([this.textureMapping]);

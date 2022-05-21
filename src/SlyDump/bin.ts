@@ -21,6 +21,7 @@ export interface DumpChunk {
     vc18: vec4;
     vc19_ambientColor: vec4;
     vc29: vec4;
+    fc: Map<number, vec4>; // Fragment constants
     projMatrix: mat4;
 }
 
@@ -54,6 +55,7 @@ interface ObjModel {
     vc18: number[];
     vc19_ambientColor: number[];
     vc29: number[];
+    fc: Map<number, vec4>; // Fragment constants
     projMatrix: mat4;
     textureIsOpaque: boolean;
 }
@@ -125,6 +127,9 @@ export class ObjFile {
                 case 'vc':
                     this.parseVc(lineItems);
                     break;
+                case 'fc':
+                    this.parseFc(lineItems);
+                    break;
                 case 's': // Smooth shading statement
                     this.parseSmoothShadingStatement(lineItems);
                     break;
@@ -159,6 +164,7 @@ export class ObjFile {
                 vc18: [],
                 vc19_ambientColor: [],
                 vc29: [],
+                fc: new Map(),
                 projMatrix: mat4.create(),
                 textureIsOpaque: false,
             });
@@ -185,6 +191,7 @@ export class ObjFile {
             vc18: [],
             vc19_ambientColor: [],
             vc29: [],
+            fc: new Map(),
             projMatrix: mat4.create(),
             textureIsOpaque: false,
         });
@@ -258,6 +265,18 @@ export class ObjFile {
             parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),
             parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++]),parseFloat(lineItems[n++])
         );
+    }
+
+    private parseFc(lineItems: string[]) {
+        let n = 1;
+
+        const offset = parseInt(lineItems[n++]);
+        const v = vec4.fromValues(
+            parseFloat(lineItems[n++]),
+            parseFloat(lineItems[n++]),
+            parseFloat(lineItems[n++]),
+            parseFloat(lineItems[n++]));
+        this.currentModel().fc.set(offset, v);
     }
 
     private parsePolygon(lineItems: string[]) {
@@ -379,9 +398,11 @@ export function parseDump(obj: ObjResult): DumpChunk[] {
 
         const index = parseInt(model.name.split("_", 1)[0]);
 
+        const fc = model.fc;
+
         dumpChunks.push({
             index, name: model.name, vertexData, indexData: indices, textureName, drawType,
-            transformBranchBits, vc17, vc18, vc19_ambientColor, vc29, projMatrix, textureIsOpaque
+            transformBranchBits, vc17, vc18, vc19_ambientColor, vc29, fc, projMatrix, textureIsOpaque
         });
     }
 
