@@ -49,6 +49,7 @@ interface ObjModel {
     // Sly data
     vertexDiff: number[];
     vertexSpec: number[];
+    hasFloatSpecDiff: boolean;
     drawType: number;
     transformBranchBits: number;
     vc17: number[];
@@ -161,6 +162,7 @@ export class ObjFile {
                 faces: [],
                 vertexDiff: [],
                 vertexSpec: [],
+                hasFloatSpecDiff: false,
                 drawType: 0,
                 transformBranchBits: 0,
                 vc17: [],
@@ -188,6 +190,7 @@ export class ObjFile {
             faces: [],
             vertexDiff: [],
             vertexSpec: [],
+            hasFloatSpecDiff: false,
             drawType: 0,
             transformBranchBits: 0,
             vc17: [],
@@ -233,31 +236,39 @@ export class ObjFile {
         this.currentModel().normals.push(x, y, z);
     }
 
-    private parseV36(lineItems: string[], hasNormal: boolean, hasSpec: boolean) {
+    private parseV36(lineItems: string[], hasFloatSpecDiff: boolean, hasSpec: boolean) {
         let n = 1;
 
         const x = parseFloat(lineItems[n++]);
         const y = parseFloat(lineItems[n++]);
         const z = parseFloat(lineItems[n++]);
-
-        if (hasNormal) {
-            const nx = parseFloat(lineItems[n++]);
-            const ny = parseFloat(lineItems[n++]);
-            const nz = parseFloat(lineItems[n++]);
-            this.currentModel().normals.push(nx, ny, nz);
-        }
+        this.currentModel().vertices.push(x, y, z);
 
         const u = parseFloat(lineItems[n++]);
         const v = parseFloat(lineItems[n++]);
-
-        const vdiff = parseInt(lineItems[n++], 16);
-        const vspec = parseInt(lineItems[n++], 16);
-
-        this.currentModel().vertices.push(x, y, z);
         this.currentModel().textureCoords.push(u, v);
-        this.currentModel().vertexDiff.push(vdiff);
-        if (hasSpec)
-            this.currentModel().vertexSpec.push(vspec);
+
+        if (hasFloatSpecDiff) {
+            this.currentModel().hasFloatSpecDiff = true;
+
+            const dx = parseFloat(lineItems[n++]);
+            const dy = parseFloat(lineItems[n++]);
+            const dz = parseFloat(lineItems[n++]);
+            const dw = parseFloat(lineItems[n++]);
+            this.currentModel().vertexDiff.push(dx, dy, dz, dw);
+            const sx = parseFloat(lineItems[n++]);
+            const sy = parseFloat(lineItems[n++]);
+            const sz = parseFloat(lineItems[n++]);
+            const sw = parseFloat(lineItems[n++]);
+            this.currentModel().vertexSpec.push(sx, sy, sz, sw);
+        } else {
+            const vdiff = parseInt(lineItems[n++], 16);
+            this.currentModel().vertexDiff.push(vdiff);
+            if (hasSpec) {
+                const vspec = parseInt(lineItems[n++], 16);
+                this.currentModel().vertexSpec.push(vspec);
+            }
+        }
     }
 
     private parseVc(lineItems: string[]) {
@@ -360,22 +371,29 @@ export function parseDump(obj: ObjResult): DumpChunk[] {
         if (model.vertices.length == 0)
             continue;
 
-        let diffArray = new Float32Array(model.vertexDiff.length * 4);
-        for (let i = 0; i < model.vertexDiff.length; ++i) {
-            const n = model.vertexDiff[i];
-            diffArray[i * 4 + 3] = ((n & 0xFF000000) >>> 24) / 255.0;
-            diffArray[i * 4 + 2] = ((n & 0x00FF0000) >>> 16) / 255.0;
-            diffArray[i * 4 + 1] = ((n & 0x0000FF00) >>> 8) / 255.0;
-            diffArray[i * 4 + 0] = ((n & 0x000000FF) >>> 0) / 255.0;
-        }
+        let diffArray: Float32Array;
+        let specArray: Float32Array;
+        if (model.hasFloatSpecDiff) {
+            diffArray = new Float32Array(model.vertexDiff);
+            specArray = new Float32Array(model.vertexSpec);
+        } else {
+            diffArray = new Float32Array(model.vertexDiff.length * 4);
+            for (let i = 0; i < model.vertexDiff.length; ++i) {
+                const n = model.vertexDiff[i];
+                diffArray[i * 4 + 3] = ((n & 0xFF000000) >>> 24) / 255.0;
+                diffArray[i * 4 + 2] = ((n & 0x00FF0000) >>> 16) / 255.0;
+                diffArray[i * 4 + 1] = ((n & 0x0000FF00) >>> 8) / 255.0;
+                diffArray[i * 4 + 0] = ((n & 0x000000FF) >>> 0) / 255.0;
+            }
 
-        let specArray = new Float32Array(model.vertexSpec.length * 4);
-        for (let i = 0; i < model.vertexSpec.length; ++i) {
-            const n = model.vertexSpec[i];
-            specArray[i * 4 + 3] = ((n & 0xFF000000) >>> 24) / 255.0;
-            specArray[i * 4 + 2] = ((n & 0x00FF0000) >>> 16) / 255.0;
-            specArray[i * 4 + 1] = ((n & 0x0000FF00) >>> 8) / 255.0;
-            specArray[i * 4 + 0] = ((n & 0x000000FF) >>> 0) / 255.0;
+            specArray = new Float32Array(model.vertexSpec.length * 4);
+            for (let i = 0; i < model.vertexSpec.length; ++i) {
+                const n = model.vertexSpec[i];
+                specArray[i * 4 + 3] = ((n & 0xFF000000) >>> 24) / 255.0;
+                specArray[i * 4 + 2] = ((n & 0x00FF0000) >>> 16) / 255.0;
+                specArray[i * 4 + 1] = ((n & 0x0000FF00) >>> 8) / 255.0;
+                specArray[i * 4 + 0] = ((n & 0x000000FF) >>> 0) / 255.0;
+            }
         }
 
         const vertexData: VertexData = {

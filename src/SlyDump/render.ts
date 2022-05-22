@@ -128,6 +128,10 @@ void mainPS() {
     // gl_FragColor = tex; gl_FragColor.a = 1.0; return;
     // gl_FragColor = spec_color; gl_FragColor.a = 1.0; return;
     // gl_FragColor = spec_color.aaaa; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = spec_color.rrrr; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = spec_color.gggg; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = spec_color.bbbb; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = spec_color.aaaa; gl_FragColor.a = 1.0; return;
     // gl_FragColor = diff_color; gl_FragColor.a = 1.0; return;
     // gl_FragColor = diff_color.aaaa; gl_FragColor.a = 1.0; return;
     // gl_FragColor.rgb = v_AmbientColor; gl_FragColor.a = 1.0; return;
@@ -157,15 +161,14 @@ void mainPS() {
     // }
 
     // HACKY
-    if (u_DrawType == M_Skeletal || u_DrawType == M_Water) {
-        bool is_lighting = ((int(u_TransformBranchBits) & 0x10) != 0);
-        if (is_lighting) {
-            // gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); return;
-
-            spec_color = vec4(0.26, 0.26, 0.26, 0.5);
-            diff_color = vec4(0.26, 0.26, 0.26, 0.5);
-        }
-    }
+    // if (u_DrawType == M_Skeletal || u_DrawType == M_Water) {
+    //     bool is_lighting = ((int(u_TransformBranchBits) & 0x10) != 0);
+    //     if (is_lighting) {
+    //         // gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); return;
+    //         spec_color = vec4(0.26, 0.26, 0.26, 0.5);
+    //         diff_color = vec4(0.26, 0.26, 0.26, 0.5);
+    //     }
+    // }
 
     if (    u_DrawType == M_Normal  ||
             u_DrawType == M_Normal2 ||
