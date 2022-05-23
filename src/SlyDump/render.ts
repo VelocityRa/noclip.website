@@ -93,9 +93,20 @@ void mainVS() {
     v_Texcoord = u_TexcoordOffset.xy + a_Texcoord;
 
     vec3 pos = a_Position.xzy * vec3(1.0, 1.0, -1.0);
-    vec4 modelViewPos = Mul(u_ModelView, vec4(pos, 1.0));
+
+    vec4 modelViewPos;
+    if (u_DrawType == M_Skydome) {
+        Mat4x4 modelView = u_ModelView;
+        modelView.mx.w = 0.0;
+        modelView.my.w = -5000.0;
+        modelView.mz.w = 0.0;
+        modelViewPos = Mul(modelView, vec4(pos, 1.0));
+    } else {
+        modelViewPos = Mul(u_ModelView, vec4(pos, 1.0));
+    }
 
     gl_Position = Mul(u_Projection, modelViewPos);
+
     v_Depth = saturate(((1.0 - gl_Position.z) - u_gVecFogParams.x) * u_gVecFogParams.y) * u_gVecFogParams.w;
 }
 #endif
@@ -146,6 +157,10 @@ void mainPS() {
     // }
 
     // if (u_DrawType == M_Water) {
+    //     gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+    //     return;
+    // }
+    // if (u_DrawType == M_Skeletal) {
     //     gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
     //     return;
     // }
@@ -271,7 +286,7 @@ export class SlyDumpRenderer {
         else
             rendererLayer = GfxRendererLayer.TRANSLUCENT;
 
-        template.sortKey = this.dumpChunk.index;
+        // template.sortKey = this.dumpChunk.index;
 
         template.getMegaStateFlags().cullMode = this.dumpChunk.textureIsOpaque ? GfxCullMode.Back : GfxCullMode.None;
         template.getMegaStateFlags().depthWrite = !isSkydome;
@@ -425,7 +440,7 @@ export class Scene implements Viewer.SceneGfx {
             blendDstFactor: GfxBlendFactor.OneMinusSrcAlpha,
         }));
 
-        viewerInput.camera.setClipPlanes(20, 400000);
+        viewerInput.camera.setClipPlanes(25, 500000);
 
         let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_SceneParams, 32);
         const mapped = template.mapUniformBufferF32(SlyDumpProgram.ub_SceneParams);
