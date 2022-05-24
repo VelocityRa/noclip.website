@@ -503,7 +503,9 @@ function interactiveSliderSelect(items: any[], testItem: (itemIndex: number, v: 
 }
 
 export function interactiveVizSliderSelect(items: any[], fieldName: string = 'visible', callback: ((obj: any, itemIndex: number) => void) | null = null): void {
-    const visibleItems = items.filter((v) => v[fieldName]);
+    const visibleItems = items.filter((v) => v[fieldName]).sort(
+        (a, b) => (a.sortKey - b.sortKey)
+    );
 
     interactiveSliderSelect(visibleItems, (i, v) => {
         const item = visibleItems[i];

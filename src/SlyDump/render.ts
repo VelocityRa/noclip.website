@@ -22,6 +22,7 @@ import { DataFetcher } from '../DataFetcher';
 import { reverseDepthForCompareMode } from '../gfx/helpers/ReversedDepthHelpers';
 import { sceneGroup } from './scenes';
 import { assert } from '../util';
+import { IS_DEVELOPMENT } from '../BuildVersion';
 class SlyDumpProgram extends DeviceProgram {
     public static a_Position = 0;
     public static a_Normal = 1;
@@ -111,6 +112,9 @@ void mainVS() {
 }
 #endif
 
+// TODO
+#define IS_TRANSPARENT true
+
 #ifdef FRAG
 float saturate(float x) {
     return clamp(x, 0.0, 1.0);
@@ -195,7 +199,6 @@ void mainPS() {
         h0 = saturate(diff_color);
         h0.a = h0.a * h1.a * 2.0;  // actual shader does * 4 but we * 2 at dump time
         h1.x = vec4(dot(h1.rgb, u_fc80.rgb)).x;
-
         h3.rgb = h0.rgb * h1.xxx * 2.;
         h1.rgb = h2.rgb - vec3(v_Depth) * h2.rgb;
         h0.rgb = v_AmbientColor - h3.rgb;
@@ -216,6 +219,11 @@ void mainPS() {
     } else {
         h0 = vec4(1.0, 0.0, 0.0, 1.0);
     }
+
+#ifdef IS_TRANSPARENT
+    if (h0.a < 1.0 - 0.98824)
+        discard;
+#endif
 
     gl_FragColor = h0;
 }
@@ -239,6 +247,10 @@ export class SlyDumpRenderer {
     public indexBuffer: GfxBuffer;
 
     public inputState: GfxInputState;
+
+    // debug
+    public sortKey: number;
+    public isAllDiffAlphaOpaque = true;
 
     constructor(device: GfxDevice, public dumpChunk: DumpChunk, private inputLayout: GfxInputLayout, private textureMapping: TextureMapping | null) {
         this.name = dumpChunk.name;
@@ -264,7 +276,15 @@ export class SlyDumpRenderer {
         ],
         { buffer: this.indexBuffer, byteOffset: 0 });
 
+
         this.numVertices = vertexData.positions.length;
+
+        for (let i = 0; i < vertexData.diff.length; i += 4) {
+            if (vertexData.diff[i + 3] < 0.5) {
+                this.isAllDiffAlphaOpaque = false;
+                break;
+            }
+        }
     }
 
     public setVisible(v: boolean) {
@@ -275,22 +295,25 @@ export class SlyDumpRenderer {
         if (!this.visible)
             return;
 
-        const template = renderInstManager.pushTemplateRenderInst();
+        const isOpaque = (this.dumpChunk.textureIsOpaque && this.isAllDiffAlphaOpaque);
 
         const isSkydome = (this.dumpChunk.drawType == 1);
         let rendererLayer: GfxRendererLayer;
         if (isSkydome)
             rendererLayer = GfxRendererLayer.BACKGROUND;
-        else if (this.dumpChunk.textureIsOpaque)
+        else if (isOpaque)
             rendererLayer = GfxRendererLayer.OPAQUE;
         else
             rendererLayer = GfxRendererLayer.TRANSLUCENT;
 
+        const template = renderInstManager.pushTemplateRenderInst();
         // template.sortKey = this.dumpChunk.index;
+        template.sortKey = ((rendererLayer << 23) >>> 0) | (this.dumpChunk.index >>> 0);
+        this.sortKey = template.sortKey;
 
-        template.getMegaStateFlags().cullMode = this.dumpChunk.textureIsOpaque ? GfxCullMode.Back : GfxCullMode.None;
+        template.getMegaStateFlags().cullMode = isOpaque ? GfxCullMode.Back : GfxCullMode.None;
         template.getMegaStateFlags().depthWrite = !isSkydome;
-        template.getMegaStateFlags().depthCompare = reverseDepthForCompareMode(isSkydome ? GfxCompareMode.Always : GfxCompareMode.Less);
+        template.getMegaStateFlags().depthCompare = reverseDepthForCompareMode((isSkydome) ? GfxCompareMode.Always : GfxCompareMode.Less);
         // template.getMegaStateFlags().frontFace = isSkydome ? GfxFrontFaceMode.CW : GfxFrontFaceMode.CCW;
         template.getMegaStateFlags().frontFace = GfxFrontFaceMode.CCW;
 

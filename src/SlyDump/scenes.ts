@@ -66,9 +66,21 @@ export class SlyDumpSceneDesc implements SceneDesc {
 }
 
 const sceneDescs = [
-    new SlyDumpSceneDesc('0', '0. Prologue', true),
-    new SlyDumpSceneDesc('1', '5. Blood Bath Bay (from "Dead Men Tell No Tales")', true),
-    new SlyDumpSceneDesc('2', 'testing', false),
+    new SlyDumpSceneDesc('sly3_5_h_ext_hub/0', 'flight of fancy', false),
+    new SlyDumpSceneDesc('sly3_5_h_ext_hub/1', '1 flight of fancy', false),
+    new SlyDumpSceneDesc('sly3_5_h_ext_hub/2', '2 flight of fancy', false),
+    new SlyDumpSceneDesc('sly3_5_h_ext_hub/3', '3 flight of fancy', false),
+    new SlyDumpSceneDesc('sly3_7_p_ext_hub/0', '5. Blood Bath Bay (from "Dead Men Tell No Tales")', false),
+    new SlyDumpSceneDesc('sly3_7_p_ext_hub/1', 'reord 5. Blood Bath Bay (from "Dead Men Tell No Tales")', false),
+    new SlyDumpSceneDesc('sly3_7_p_ext_hub/2', 'reord2 5. Blood Bath Bay (from "Dead Men Tell No Tales")', false),
+    new SlyDumpSceneDesc('sly3_7_p_ext_hub/3', 'reord3 5. Blood Bath Bay (from "Dead Men Tell No Tales")', false),
+    new SlyDumpSceneDesc('sly3_7_p_ext_hub/4', 'reord4 5. Blood Bath Bay (from "Dead Men Tell No Tales")', false),
+    new SlyDumpSceneDesc('sly3_7_p_ext_hub/5', 'reord5 5. Blood Bath Bay (from "Dead Men Tell No Tales")', false),
+    new SlyDumpSceneDesc('sly3_1_m_ext_hub/0', '6. Kaine Island (from "Honor Among Thieves")', false),
+
+    new SlyDumpSceneDesc('0', '0', false),
+    new SlyDumpSceneDesc('1', '1', false),
+    new SlyDumpSceneDesc('2', '2', false),
 ];
 
 const id = 'SlyDump';
