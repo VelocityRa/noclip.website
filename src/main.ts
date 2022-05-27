@@ -470,6 +470,11 @@ class Main {
         } else {
             return ['', ''];
         }
+
+        if (this.ui.sceneSelect.sceneGroupList.highlightedIndex != -1)
+            this.ui.sceneSelect.sceneGroupList.selectItem(this.ui.sceneSelect.sceneGroupList.highlightedIndex);
+        else
+            this.ui.sceneSelect.sceneGroupList.focusItem(0);
     }
 
     private _onHashChange(): void {

@@ -814,7 +814,7 @@ export class Panel implements Widget {
 
     private syncSize() {
         const widthExpanded = this.expanded || this.mainPanel.matches(':hover');
-        this.mainPanel.style.width = widthExpanded ? '440px' : '28px';
+        this.mainPanel.style.width = widthExpanded ? this.header.style.width : '28px';
 
         const heightExpanded = this.expanded;
         if (heightExpanded) {
@@ -926,7 +926,7 @@ class SceneSelect extends Panel {
 
     private searchEntry: TextEntry;
     private randomButton: HTMLElement;
-    private sceneGroupList: SingleSelect;
+    public sceneGroupList: SingleSelect;
     private sceneDescList: SingleSelect;
 
     private selectedSceneGroup: SceneGroup;
@@ -941,6 +941,9 @@ class SceneSelect extends Panel {
 
     constructor(public viewer: Viewer.Viewer) {
         super();
+        this.header.style.width = '300px';
+        this.contents.style.width = '300px';
+
         this.setTitle(OPEN_ICON, 'Games');
 
         const topBox = document.createElement('div');
@@ -985,7 +988,7 @@ class SceneSelect extends Panel {
         this.sceneDescList = new SingleSelect();
         this.sceneDescList.setHighlightFlair = false;
         this.sceneDescList.elem.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-        this.sceneDescList.elem.style.width = '500px';
+        this.sceneDescList.elem.style.width = '650px';
         this.sceneDescList.setHeight('472px');
         this.extraRack.appendChild(this.sceneDescList.elem);
 
@@ -1196,7 +1199,7 @@ class SceneSelect extends Panel {
         this.syncSceneDescs();
     }
 
-    private selectSceneGroupIndex(i: number) {
+    public selectSceneGroupIndex(i: number) {
         this.selectSceneGroup(this.sceneGroups[i] as SceneGroup);
     }
 

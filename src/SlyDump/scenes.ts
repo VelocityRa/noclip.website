@@ -38,7 +38,7 @@ export class SlyDumpSceneDesc implements SceneDesc {
 
         if (this.compressed) {
             const zip = parseZipFile(await sceneContext.dataFetcher.fetchData(`${pathBase}/${this.id}.zip`));
-            objFileData = getFileFromZip(zip, `${this.id}.obj`);
+            objFileData = getFileFromZip(zip, `${this.id.split('/')[1]}.obj`);
         } else {
             objFileData = await sceneContext.dataFetcher.fetchData(`${pathBase}/${this.id}.obj`);
         }
@@ -66,10 +66,33 @@ export class SlyDumpSceneDesc implements SceneDesc {
 }
 
 const sceneDescs = [
+    "Main Hub Areas",
+    new SlyDumpSceneDesc('sly3_1_m_ext_hub/0', 'Kaine Island, South Pacific (from Prologue "Beginning of the End")', false),
+    new SlyDumpSceneDesc('sly3_hub/0', 'Venice, Italy (from Ep.1 "An Opera of Fear")', false),
+    new SlyDumpSceneDesc('sly3_hub/0', 'Yuendumu, Australia (from Ep.2 "Rumble Down Under")', false),
+    new SlyDumpSceneDesc('sly3_5_h_ext_hub/0', 'Kinderdijk, Holland (from Ep.3 "Flight of Fancy")', false),
+    new SlyDumpSceneDesc('sly3_hub/0', 'Kunlun Mountains, China (from Ep.4 "A Cold Alliance")', false),
+    new SlyDumpSceneDesc('sly3_7_p_ext_hub/0', 'Blood Bath Bay (from Ep.5 "Dead Men Tell No Tales")', false),
+    new SlyDumpSceneDesc('sly3_1_m_ext_hub/0', 'Kaine Island, South Pacific (from Ep.6 "Honor Among Thieves")', false),
+
+    "Jobs",
+    new SlyDumpSceneDesc('TODO', 'TODO', true),
+    "Main Hub Area day variations",
+    new SlyDumpSceneDesc('TODO', 'TODO', true),
+    "Master Thief Challenges",
+    new SlyDumpSceneDesc('TODO', 'TODO', true),
+
+    "Other",
+    new SlyDumpSceneDesc('sly3_hub/0', 'Unknown (Hazard Room)', true),
+
+    "Debug",
+    new SlyDumpSceneDesc('sly3_1_m_ext_hub/1', 'Kaine Island, South Pacific (from Prologue "Beginning of the End")', false),
+    new SlyDumpSceneDesc('sly3_7_p_ext_hub/1', 'Blood Bath Bay (from Ep.5 "Dead Men Tell No Tales")', false),
+    new SlyDumpSceneDesc('sly3_7_p_ext_hub/2', 'Blood Bath Bay (from Ep.5 "Dead Men Tell No Tales")', false),
     new SlyDumpSceneDesc('sly3_5_h_ext_hub/0', 'flight of fancy', false),
     new SlyDumpSceneDesc('sly3_5_h_ext_hub/1', '1 flight of fancy', false),
     new SlyDumpSceneDesc('sly3_5_h_ext_hub/2', '2 flight of fancy', false),
-    new SlyDumpSceneDesc('sly3_5_h_ext_hub/3', '3 flight of fancy', false),
+    new SlyDumpSceneDesc('sly3_5_h_ext_hub/3', '3. Kinderdijk, Holland (from "5. Flight of Fancy")', false),
     new SlyDumpSceneDesc('sly3_7_p_ext_hub/0', '5. Blood Bath Bay (from "Dead Men Tell No Tales")', false),
     new SlyDumpSceneDesc('sly3_7_p_ext_hub/1', 'reord 5. Blood Bath Bay (from "Dead Men Tell No Tales")', false),
     new SlyDumpSceneDesc('sly3_7_p_ext_hub/2', 'reord2 5. Blood Bath Bay (from "Dead Men Tell No Tales")', false),

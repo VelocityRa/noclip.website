@@ -27,8 +27,8 @@ export interface DumpChunk {
 
 interface ObjFaceVertex {
     vertexIndex: number;
-    textureCoordsIndex: number;
-    vertexNormalIndex: number;
+    // textureCoordsIndex: number;
+    // vertexNormalIndex: number;
 }
 
 interface ObjFace {
@@ -320,11 +320,11 @@ export class ObjFile {
             if (vertexValues.length < 1 || vertexValues.length > 3) { throw (`Too many values (separated by /) for a single vertex`); }
 
             let vertexIndex = 0;
-            let textureCoordsIndex = 0;
-            let vertexNormalIndex = 0;
+            // let textureCoordsIndex = 0;
+            // let vertexNormalIndex = 0;
             vertexIndex = parseInt(vertexValues[0]);
-            if (vertexValues.length > 1 && (vertexValues[1] != '')) { textureCoordsIndex = parseInt(vertexValues[1]); }
-            if (vertexValues.length > 2) { vertexNormalIndex = parseInt(vertexValues[2]); }
+            // if (vertexValues.length > 1 && (vertexValues[1] != '')) { textureCoordsIndex = parseInt(vertexValues[1]); }
+            // if (vertexValues.length > 2) { vertexNormalIndex = parseInt(vertexValues[2]); }
 
             // if (vertexIndex == 0) { throw 'Faces uses invalid vertex index of 0'; }
 
@@ -334,8 +334,8 @@ export class ObjFile {
 
             face.vertices.push({
                 vertexIndex,
-                textureCoordsIndex,
-                vertexNormalIndex
+                // textureCoordsIndex,
+                // vertexNormalIndex
             });
         }
         this.currentModel().faces.push(face);
