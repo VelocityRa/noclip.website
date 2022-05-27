@@ -1,6 +1,6 @@
 <img align="right" src="src/assets/logo.png">
 
-# <a href="https://noclip.website">noclip</a>
+# <a href="http://slycooper.xyz">noclip</a>
 
 The reverse engineering of model formats was done by many people. See the application for full credits.
 

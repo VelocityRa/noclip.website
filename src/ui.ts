@@ -1978,8 +1978,8 @@ class About extends Panel {
 }
 </style>
 
-<h1> <img src="${logoURL}"> <span> noclip.website </span> </h1>
-<h2> A digital museum of video game levels </h2>
+<h1> <img src="${logoURL}"> <span> slycooper.xyz </span> </h1>
+<h2> A digital museum of Sly Cooper levels </h2>
 
 <a href="#" class="FAQLink"> What is this? / FAQ </a>
 
@@ -2664,7 +2664,7 @@ class RecordingBranding {
         this.elem.style.textShadow = '0px 0px 10px rgba(0, 0, 0, 0.8)';
         this.elem.style.visibility = 'hidden';
         this.elem.style.userSelect = 'none';
-        this.elem.textContent = '[ noclip.website ]';
+        this.elem.textContent = 'slycooper.xyz';
     }
 
     public v(): void {

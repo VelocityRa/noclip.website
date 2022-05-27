@@ -198,7 +198,6 @@ void mainPS() {
         h2 = spec_color;
         h2.rgb = ((h1 * h2) * 2.).rgb;
         h0 = saturate(diff_color);
-        // gl_FragColor.rgb = h0.rgb; gl_FragColor.a = 1.0; return;
         h0.a = h0.a * h1.a * 2.0;  // actual shader does * 4 but we * 2 at dump time
         h1.x = vec4(dot(h1.rgb, u_fc80.rgb)).x;
         h3.rgb = h0.rgb * h1.xxx * 2.;
