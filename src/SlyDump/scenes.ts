@@ -29,6 +29,23 @@ function fetchImage(dataFetcher: DataFetcher, path: string): Promise<ImageData> 
     return p;
 }
 
+function convertBlobToImageData(blob: Blob): Promise<ImageData> {
+    const img = document.createElement('img');
+    img.crossOrigin = 'anonymous';
+    img.src = URL.createObjectURL(blob);
+    const p = new Promise<ImageData>((resolve) => {
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(img, 0, 0);
+            resolve(ctx.getImageData(0, 0, img.width, img.height));
+        };
+    });
+    return p;
+}
+
 export class SlyDumpSceneDesc implements SceneDesc {
     constructor(public id: string, public name: string = id, private compressed: boolean = false) {
     }
@@ -39,29 +56,51 @@ export class SlyDumpSceneDesc implements SceneDesc {
         if (this.compressed) {
             const zip = parseZipFile(await sceneContext.dataFetcher.fetchData(`${pathBase}/${this.id}.zip`));
             objFileData = getFileFromZip(zip, `${this.id.split('/')[1]}.obj`);
+
+            // TODO: cleanup
+            var dec = new TextDecoder("utf-8");
+            const obj = new ObjFile(dec.decode(objFileData.createDataView())).parse();
+
+            let textures = new Map<string, ImageData>();
+            for (let materialName of obj.materials) {
+                if (materialName == "0x0")
+                    continue;
+                try {
+                    const buffer = getFileFromZip(zip, `${this.id.split('/')[1]}/${materialName}.png`);
+                    const blob = new Blob([buffer.createTypedArray(Uint8Array)], { type: 'application/octet-stream' });
+                    const imageData = await convertBlobToImageData(blob)
+                    textures.set(materialName, imageData);
+                } catch (e: unknown) {
+                    console.error(e);
+                    continue;
+                }
+            }
+            const dumpChunks = parseDump(obj);
+
+            return new Scene(device, dumpChunks, textures);
         } else {
             objFileData = await sceneContext.dataFetcher.fetchData(`${pathBase}/${this.id}.obj`);
-        }
 
-        var dec = new TextDecoder("utf-8");
-        const obj = new ObjFile(dec.decode(objFileData.createDataView())).parse();
+            var dec = new TextDecoder("utf-8");
+            const obj = new ObjFile(dec.decode(objFileData.createDataView())).parse();
 
-        let textures = new Map<string, ImageData>();
-        for (let materialName of obj.materials) {
-            if (materialName == "0x0")
-                continue;
-            const texturePath = `${pathBase}/${this.id}/${materialName}.png`;
-            try {
-                const imageData = await fetchImage(sceneContext.dataFetcher, texturePath);
-                textures.set(materialName, imageData);
-            } catch (e: unknown) {
-                console.error(e);
-                continue;
+            let textures = new Map<string, ImageData>();
+            for (let materialName of obj.materials) {
+                if (materialName == "0x0")
+                    continue;
+                const texturePath = `${pathBase}/${this.id}/${materialName}.png`;
+                try {
+                    const imageData = await fetchImage(sceneContext.dataFetcher, texturePath);
+                    textures.set(materialName, imageData);
+                } catch (e: unknown) {
+                    console.error(e);
+                    continue;
+                }
             }
-        }
-        const dumpChunks = parseDump(obj);
+            const dumpChunks = parseDump(obj);
 
-        return new Scene(device, dumpChunks, textures);
+            return new Scene(device, dumpChunks, textures);
+        }
     }
 }
 
@@ -83,10 +122,10 @@ const sceneDescs = [
     new SlyDumpSceneDesc('TODO', 'TODO', true),
 
     "Other",
-    new SlyDumpSceneDesc('sly3_2_i_trainer_hub/0', 'Unknown (Hazard Room)', false),
+    new SlyDumpSceneDesc('sly3_2_i_trainer_hub/0', 'Unknown (Hazard Room)', true),
 
     // "Debug",
-    // new SlyDumpSceneDesc('sly3_1_m_ext_hub/1', 'Kaine Island, South Pacific (from Prologue "Beginning of the End")', false),
+    // new SlyDumpSceneDesc('sly3_1_m_ext_hub/1', 'Kaine Island, South Pacific (from Prologue "Beginning of the End")', true),
     // new SlyDumpSceneDesc('sly3_7_p_ext_hub/1', 'Blood Bath Bay (from Ep.5 "Dead Men Tell No Tales")', false),
     // new SlyDumpSceneDesc('sly3_7_p_ext_hub/2', 'Blood Bath Bay (from Ep.5 "Dead Men Tell No Tales")', false),
     // new SlyDumpSceneDesc('sly3_5_h_ext_hub/0', 'flight of fancy', false),

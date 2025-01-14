@@ -130,8 +130,8 @@ void mainPS() {
     // gl_FragColor = vec4(c, c, c, 1.0); return;
     // gl_FragColor = vec4(v_Depth, v_Depth, v_Depth, 1.0); return;
 
-    vec4 diff_color = v_Diff;
-    vec4 spec_color = v_Spec;
+    vec4 diff_color = v_Diff; // rgb is vertex color (have to do *2). a is transparency for something
+    vec4 spec_color = v_Spec; // rgb is lighting related. a is lighting related
 
     vec4 h0 = vec4(0.);
     vec4 h1 = vec4(0.);
@@ -147,7 +147,7 @@ void mainPS() {
     // gl_FragColor = spec_color.gggg; gl_FragColor.a = 1.0; return;
     // gl_FragColor = spec_color.bbbb; gl_FragColor.a = 1.0; return;
     // gl_FragColor = spec_color.aaaa; gl_FragColor.a = 1.0; return;
-    // gl_FragColor = diff_color; gl_FragColor.a = 1.0; return;
+    // gl_FragColor = diff_color*vec4(2.); gl_FragColor.a = 1.0; return;
     // gl_FragColor = diff_color.aaaa; gl_FragColor.a = 1.0; return;
     // gl_FragColor.rgb = v_AmbientColor; gl_FragColor.a = 1.0; return;
     // gl_FragColor = u_fc80; gl_FragColor.a = 1.0; return;
@@ -212,7 +212,7 @@ void mainPS() {
         h0 = h0 * h1 * 2.; // actual shader does * 4 to alpha but we * 2 at dump time
         h1.xyz = v_AmbientColor - h0.rgb;
         h2.w = v_Depth;
-        h0.xyz = fma4(h2.wwww, h1, h0).xyz;
+        h0.xyz = h2.www * h1.rgb + h0.rgb;
     // } else if (u_DrawType == M_Water) {
     //     h0 = tex;
     //     h1 = saturate(diff_color);
