@@ -6,7 +6,7 @@ import * as Viewer from '../viewer';
 import * as UI from '../ui';
 
 import { GfxDevice, GfxBufferUsage, GfxBuffer, GfxFormat, GfxInputLayout, GfxProgram, GfxBindingLayoutDescriptor, GfxRenderPass, GfxBindings, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxInputLayoutBufferDescriptor, GfxCullMode, GfxBlendFactor, GfxBlendMode, GfxTexture, makeTextureDescriptor2D, GfxMipFilterMode, GfxTexFilterMode, GfxWrapMode, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor } from '../gfx/platform/GfxPlatform';
-import { fillColor, fillFloat, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers';
+import { fillColor, fillFloat, fillMatrix4x3, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers';
 import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
 import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper';
@@ -23,6 +23,8 @@ import { reverseDepthForCompareMode } from '../gfx/helpers/ReversedDepthHelpers'
 import { sceneGroup } from './scenes';
 import { assert } from '../util';
 import { IS_DEVELOPMENT } from '../BuildVersion';
+
+
 class SlyDumpProgram extends DeviceProgram {
     public static a_Position = 0;
     public static a_Normal = 1;
@@ -37,8 +39,8 @@ class SlyDumpProgram extends DeviceProgram {
 precision mediump float;
 
 layout(std140, row_major) uniform ub_SceneParams {
-    mat4x4 u_Projection;
-    mat4x4 u_ModelView;
+    mat4 u_Projection;
+    mat4x3 u_ModelView;
 };
 
 layout(std140, row_major) uniform ub_ObjectParams {
@@ -95,20 +97,29 @@ void mainVS() {
 
     vec3 pos = a_Position.xzy * vec3(1.0, 1.0, -1.0);
 
-    vec4 modelViewPos;
+    vec3 modelViewPos;
     if (u_DrawType == M_Skydome) {
-        mat4x4 modelView = u_ModelView;
-        modelView.mx.w = 0.0;
-        modelView.my.w = -5000.0;
-        modelView.mz.w = 0.0;
+        mat4x3 modelView = u_ModelView;
+        // modelView.mx.w = 0.0;
+        // modelView.my.w = -5000.0;
+        // modelView.mz.w = 0.0;
         modelViewPos = modelView * vec4(pos, 1.0);
     } else {
         modelViewPos = u_ModelView * vec4(pos, 1.0);
     }
 
-    gl_Position = u_Projection * modelViewPos;
+    gl_Position = u_Projection * vec4(modelViewPos, 1.0);
 
-    v_Depth = saturate(((1.0 - gl_Position.z) - u_gVecFogParams.x) * u_gVecFogParams.y) * u_gVecFogParams.w;
+    // HACK
+    // v_Depth = 1.0 - gl_Position.z / 1000.0;
+    v_Depth = (1.0 - saturate((gl_Position.z - 450.0) * u_gVecFogParams.y * 100.0)) * u_gVecFogParams.w * 2.0;
+
+    // v_Depth = saturate((gl_Position.z - u_gVecFogParams.x) * u_gVecFogParams.y) * u_gVecFogParams.w;
+    // v_Depth = saturate(((1.0 - gl_Position.z) - 5500.0) * 0.00002) * 0.4;
+    // v_Depth = saturate(1.0 - v_Depth) * 0.4;
+
+    // v_Depth = saturate(((1.0 - gl_Position.z) - u_gVecFogParams.x) * u_gVecFogParams.y) * u_gVecFogParams.w;
+    // v_Depth = saturate(((1.0 - gl_Position.z) - 5500.0) * 0.00002) * 0.4;
 }
 #endif
 
@@ -128,7 +139,8 @@ vec4 fma4(vec4 a, vec4 b, vec4 c) {
 
 void mainPS() {
     // gl_FragColor = vec4(c, c, c, 1.0); return;
-    // gl_FragColor = vec4(v_Depth, v_Depth, v_Depth, 1.0); return;
+    // gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); return;
+    // gl_FragColor = vec4(vec3(pow(v_Depth, 1.0)), 1.0); return;
 
     vec4 diff_color = v_Diff; // rgb is vertex color (have to do *2). a is transparency for something
     vec4 spec_color = v_Spec; // rgb is lighting related. a is lighting related
@@ -139,6 +151,7 @@ void mainPS() {
 	vec4 h3 = vec4(0.);
 
 	vec4 tex = texture(SAMPLER_2D(u_Texture), v_Texcoord);
+    // gl_FragColor = vec4(tex.rgb, 1.0); return;
 
     // gl_FragColor = tex; gl_FragColor.a = 1.0; return;
     // gl_FragColor = spec_color; gl_FragColor.a = 1.0; return;
@@ -299,6 +312,8 @@ export class SlyDumpRenderer {
         const isOpaque = (this.dumpChunk.textureIsOpaque && this.isAllDiffAlphaOpaque);
 
         const isSkydome = (this.dumpChunk.drawType == 1);
+        // if (isSkydome) // TODO: debug
+            // return;
         let rendererLayer: GfxRendererLayer;
         if (isSkydome)
             rendererLayer = GfxRendererLayer.BACKGROUND;
@@ -353,8 +368,9 @@ export class SlyDumpRenderer {
             template.setSamplerBindingsFromTextureMappings([this.textureMapping]);
         }
 
-        const renderInst = renderInstManager.newRenderInst();
         template.setVertexInput(this.inputLayout, this.vertexBufferDescriptors, this.indexBufferDescriptor);
+
+        const renderInst = renderInstManager.newRenderInst();
         renderInst.setDrawCount(this.numIndices);
         renderInstManager.submitRenderInst(renderInst);
 
@@ -389,7 +405,11 @@ export class Scene implements Viewer.SceneGfx {
     private renderInstListMain = new GfxRenderInstList();
 
     constructor(device: GfxDevice, dumpChunks: DumpChunk[], textures: Map<string, ImageData>) {
-        this.program = device.createProgram(new SlyDumpProgram());
+        this.renderHelper = new GfxRenderHelper(device);
+
+        const cache = this.renderHelper.renderCache;
+        this.program = cache.createProgram(new SlyDumpProgram());
+
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: SlyDumpProgram.a_Position,   bufferIndex: 0, bufferByteOffset: 0, format: GfxFormat.F32_RGB, },
@@ -406,9 +426,7 @@ export class Scene implements Viewer.SceneGfx {
             { byteStride: 4*0x04, frequency: GfxVertexBufferFrequency.PerVertex, },
         ];
         const indexBufferFormat = GfxFormat.U16_R;
-        this.inputLayout = device.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors, indexBufferFormat });
-
-        this.renderHelper = new GfxRenderHelper(device);
+        this.inputLayout = cache.createInputLayout({ vertexAttributeDescriptors, vertexBufferDescriptors, indexBufferFormat });
 
         const samplerBilinear = device.createSampler({
             wrapS: GfxWrapMode.Repeat,
@@ -464,12 +482,12 @@ export class Scene implements Viewer.SceneGfx {
             blendDstFactor: GfxBlendFactor.OneMinusSrcAlpha,
         }));
 
-        viewerInput.camera.setClipPlanes(25, 500000);
+        viewerInput.camera.setClipPlanes(800, 140000);
 
         let offs = template.allocateUniformBuffer(SlyDumpProgram.ub_SceneParams, 32);
         const mapped = template.mapUniformBufferF32(SlyDumpProgram.ub_SceneParams);
         offs += fillMatrix4x4(mapped, offs, viewerInput.camera.projectionMatrix);
-        offs += fillMatrix4x4(mapped, offs, viewerInput.camera.viewMatrix);
+        offs += fillMatrix4x3(mapped, offs, viewerInput.camera.viewMatrix);
 
         this.renderHelper.renderInstManager.setCurrentList(this.renderInstListMain);
 
@@ -481,8 +499,6 @@ export class Scene implements Viewer.SceneGfx {
     }
 
     public render(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput) {
-        const renderInstManager = this.renderHelper.renderInstManager;
-
         const mainColorDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.Color0, viewerInput, standardFullClearRenderPassDescriptor);
         const mainDepthDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.DepthStencil, viewerInput, standardFullClearRenderPassDescriptor);
 

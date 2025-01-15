@@ -75,8 +75,6 @@ export class DataManager {
         });
     }
 
-    // TODO
-
     private getZipEntry(filename: string): ZipFileEntry | null {
         return nullify(this.zipFile.find((entry) => entry.filename === filename));
     }
@@ -87,14 +85,6 @@ export class DataManager {
             throw new Error(`Could not find zip entry for filename: ${filename}`);
 
         return decompressZipFileEntry(zipEntry);
-    }
-
-    public signalDoneFlag(): void {
-        this.doneFlag = true;
-    }
-
-    public doneFlagSet(): boolean {
-        return this.doneFlag;
     }
 
     public isLoading(): boolean {

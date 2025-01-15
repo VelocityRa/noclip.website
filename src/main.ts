@@ -96,7 +96,7 @@ import { Viewer, SceneGfx, InitErrorCode, initializeViewer, makeErrorUI, resizeC
 // import * as Scenes_OuterWilds from './OuterWilds/Scenes.js';
 import * as Scenes_SlyDump from './SlyDump/scenes';
 
-import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops.js';
+// import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops.js';
 
 import { UI, Panel } from './ui.js';
 import { serializeCamera, deserializeCamera, FPSCameraController } from './Camera.js';
@@ -405,7 +405,7 @@ class Main {
             this.ui.dragHighlight.style.display = 'none';
             e.preventDefault();
         };
-        this.toplevel.ondrop = this._onDrop.bind(this);
+        // this.toplevel.ondrop = this._onDrop.bind(this);
 
         this.viewer.onstatistics = (statistics: RenderStatistics): void => {
             this.ui.statisticsPanel.addRenderStatistics(statistics);
@@ -600,6 +600,7 @@ class Main {
         window.requestAnimationFrame(this._onRequestAnimationFrameCanvas);
     };
 
+/*
     private async _onDrop(e: DragEvent) {
         this.ui.dragHighlight.style.display = 'none';
 
@@ -614,6 +615,7 @@ class Main {
         this.sceneDatabase.addSceneDesc(this.droppedFileGroup, sceneDesc);
         this._loadSceneDesc(sceneDesc);
     }
+*/
 
     private _onResize() {
         resizeCanvas(this.canvas, window.innerWidth, window.innerHeight, window.devicePixelRatio / this.pixelSize);
