@@ -5,12 +5,12 @@ import { DeviceProgram } from '../Program';
 import * as Viewer from '../viewer';
 import * as UI from '../ui';
 
-import { GfxDevice, GfxBufferUsage, GfxBuffer, GfxInputState, GfxFormat, GfxInputLayout, GfxProgram, GfxBindingLayoutDescriptor, GfxRenderPass, GfxBindings, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxInputLayoutBufferDescriptor, GfxCullMode, GfxBlendFactor, GfxBlendMode, GfxTexture, makeTextureDescriptor2D, GfxMipFilterMode, GfxTexFilterMode, GfxWrapMode } from '../gfx/platform/GfxPlatform';
+import { GfxDevice, GfxBufferUsage, GfxBuffer, GfxFormat, GfxInputLayout, GfxProgram, GfxBindingLayoutDescriptor, GfxRenderPass, GfxBindings, GfxVertexBufferFrequency, GfxVertexAttributeDescriptor, GfxInputLayoutBufferDescriptor, GfxCullMode, GfxBlendFactor, GfxBlendMode, GfxTexture, makeTextureDescriptor2D, GfxMipFilterMode, GfxTexFilterMode, GfxWrapMode, GfxVertexBufferDescriptor, GfxIndexBufferDescriptor } from '../gfx/platform/GfxPlatform';
 import { fillColor, fillFloat, fillMatrix4x4, fillVec4, fillVec4v } from '../gfx/helpers/UniformBufferHelpers';
-import { makeBackbufferDescSimple, pushAntialiasingPostProcessPass, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
+import { makeBackbufferDescSimple, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
 import { makeStaticDataBuffer } from '../gfx/helpers/BufferHelpers';
 import { GfxRenderHelper } from '../gfx/render/GfxRenderHelper';
-import { GfxRendererLayer, GfxRenderInstManager, makeSortKey, setSortKeyLayer } from '../gfx/render/GfxRenderInstManager';
+import { GfxRendererLayer, GfxRenderInstList, GfxRenderInstManager, makeSortKey, setSortKeyLayer } from '../gfx/render/GfxRenderInstManager';
 import { CameraController } from '../Camera';
 import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph';
 import { Red } from '../Color';
@@ -36,17 +36,17 @@ class SlyDumpProgram extends DeviceProgram {
     public override both = `
 precision mediump float;
 
-layout(std140) uniform ub_SceneParams {
-    Mat4x4 u_Projection;
-    Mat4x4 u_ModelView;
+layout(std140, row_major) uniform ub_SceneParams {
+    mat4x4 u_Projection;
+    mat4x4 u_ModelView;
 };
 
-layout(std140) uniform ub_ObjectParams {
+layout(std140, row_major) uniform ub_ObjectParams {
     vec4 vc17;
     vec4 u_TexcoordOffset; // vc18
     vec4 u_AmbientColor; // vc19
     vec4 u_gVecFogParams; // vc29
-    Mat4x4 u_GameProjectionMat;
+    mat4x4 u_GameProjectionMat;
     float u_DrawType; // TODO: specify at compile time
     float u_TransformBranchBits;
     vec4 u_fc80;
@@ -97,16 +97,16 @@ void mainVS() {
 
     vec4 modelViewPos;
     if (u_DrawType == M_Skydome) {
-        Mat4x4 modelView = u_ModelView;
+        mat4x4 modelView = u_ModelView;
         modelView.mx.w = 0.0;
         modelView.my.w = -5000.0;
         modelView.mz.w = 0.0;
-        modelViewPos = Mul(modelView, vec4(pos, 1.0));
+        modelViewPos = modelView * vec4(pos, 1.0);
     } else {
-        modelViewPos = Mul(u_ModelView, vec4(pos, 1.0));
+        modelViewPos = u_ModelView * vec4(pos, 1.0);
     }
 
-    gl_Position = Mul(u_Projection, modelViewPos);
+    gl_Position = u_Projection * modelViewPos;
 
     v_Depth = saturate(((1.0 - gl_Position.z) - u_gVecFogParams.x) * u_gVecFogParams.y) * u_gVecFogParams.w;
 }
@@ -247,7 +247,8 @@ export class SlyDumpRenderer {
     public numIndices: number;
     public indexBuffer: GfxBuffer;
 
-    public inputState: GfxInputState;
+    public vertexBufferDescriptors: GfxVertexBufferDescriptor[];
+    public indexBufferDescriptor: GfxIndexBufferDescriptor;
 
     // debug
     public sortKey: number;
@@ -268,15 +269,14 @@ export class SlyDumpRenderer {
         this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, indexData.buffer);
         this.numIndices = indexData.length;
 
-        this.inputState = device.createInputState(inputLayout, [
+        this.vertexBufferDescriptors = [
             { buffer: this.posBuffer, byteOffset: 0, },
             { buffer: this.nrmBuffer, byteOffset: 0, },
             { buffer: this.texcoordsBuffer, byteOffset: 0, },
             { buffer: this.diffBuffer, byteOffset: 0, },
             { buffer: this.specBuffer, byteOffset: 0, },
-        ],
-        { buffer: this.indexBuffer, byteOffset: 0 });
-
+        ];
+        this.indexBufferDescriptor = { buffer: this.indexBuffer, byteOffset: 0 };
 
         this.numVertices = vertexData.positions.length;
 
@@ -307,7 +307,7 @@ export class SlyDumpRenderer {
         else
             rendererLayer = GfxRendererLayer.TRANSLUCENT;
 
-        const template = renderInstManager.pushTemplateRenderInst();
+        const template = renderInstManager.pushTemplate();
         // template.sortKey = this.dumpChunk.index;
         template.sortKey = ((rendererLayer << 23) >>> 0) | (this.dumpChunk.index >>> 0);
         this.sortKey = template.sortKey;
@@ -354,11 +354,11 @@ export class SlyDumpRenderer {
         }
 
         const renderInst = renderInstManager.newRenderInst();
-        renderInst.setInputLayoutAndState(this.inputLayout, this.inputState);
-        renderInst.drawIndexes(this.numIndices);
+        template.setVertexInput(this.inputLayout, this.vertexBufferDescriptors, this.indexBufferDescriptor);
+        renderInst.setDrawCount(this.numIndices);
         renderInstManager.submitRenderInst(renderInst);
 
-        renderInstManager.popTemplateRenderInst();
+        renderInstManager.popTemplate();
     }
 
     public destroy(device: GfxDevice): void {
@@ -366,7 +366,6 @@ export class SlyDumpRenderer {
         device.destroyBuffer(this.nrmBuffer);
         device.destroyBuffer(this.indexBuffer);
         device.destroyBuffer(this.texcoordsBuffer);
-        device.destroyInputState(this.inputState);
     }
 }
 
@@ -387,6 +386,7 @@ export class Scene implements Viewer.SceneGfx {
     private slyDumpRenderers: SlyDumpRenderer[] = [];
     // private textureMappings: Map<string, TextureMapping> = new Map();
     private renderHelper: GfxRenderHelper;
+    private renderInstListMain = new GfxRenderInstList();
 
     constructor(device: GfxDevice, dumpChunks: DumpChunk[], textures: Map<string, ImageData>) {
         this.program = device.createProgram(new SlyDumpProgram());
@@ -471,10 +471,12 @@ export class Scene implements Viewer.SceneGfx {
         offs += fillMatrix4x4(mapped, offs, viewerInput.camera.projectionMatrix);
         offs += fillMatrix4x4(mapped, offs, viewerInput.camera.viewMatrix);
 
+        this.renderHelper.renderInstManager.setCurrentList(this.renderInstListMain);
+
         for (let i = 0; i < this.slyDumpRenderers.length; i++)
             this.slyDumpRenderers[i].prepareToRender(this.renderHelper.renderInstManager);
 
-        this.renderHelper.renderInstManager.popTemplateRenderInst();
+        this.renderHelper.renderInstManager.popTemplate();
         this.renderHelper.prepareToRender();
     }
 
@@ -493,15 +495,15 @@ export class Scene implements Viewer.SceneGfx {
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
             pass.attachRenderTargetID(GfxrAttachmentSlot.DepthStencil, mainDepthTargetID);
             pass.exec((passRenderer) => {
-                renderInstManager.drawOnPassRenderer(passRenderer);
+                this.renderInstListMain.drawOnPassRenderer(this.renderHelper.renderCache, passRenderer);
             });
         });
-        pushAntialiasingPostProcessPass(builder, this.renderHelper, viewerInput, mainColorTargetID);
+        this.renderHelper.antialiasingSupport.pushPasses(builder, viewerInput, mainColorTargetID);
         builder.resolveRenderTargetToExternalTexture(mainColorTargetID, viewerInput.onscreenTexture);
 
         this.prepareToRender(device, viewerInput);
         this.renderHelper.renderGraph.execute(builder);
-        renderInstManager.resetRenderInsts();
+        this.renderInstListMain.reset();
     }
 
     public destroy(device: GfxDevice): void {

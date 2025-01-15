@@ -1,133 +1,14 @@
 // Misc utilities to help me debug various issues. Mostly garbage.
 
-import { AABB } from "./Geometry";
-import { Color, Magenta, colorToCSS, Red, Green, Blue, OpaqueBlack } from "./Color";
-import { divideByW, ScreenSpaceProjection } from "./Camera";
-import { vec4, vec3, mat4, ReadonlyMat4, ReadonlyVec3, ReadonlyVec4 } from "gl-matrix";
-import { nArray, assert, assertExists, hexzero } from "./util";
-import { UI, Slider } from "./ui";
-import { getMatrixTranslation, getMatrixAxisX, getMatrixAxisY, getMatrixAxisZ, MathConstants, transformVec3Mat4w0, Vec3UnitX, lerp } from "./MathHelpers";
-import ArrayBufferSlice from "./ArrayBufferSlice";
-import { downloadBufferSlice, downloadBuffer } from "./DownloadUtils";
-import { GfxClipSpaceNearZ } from "./gfx/platform/GfxPlatform";
-
-export function stepF(f: (t: number) => number, maxt: number, step: number, callback: (t: number, v: number) => void) {
-    for (let t = 0; t < maxt; t += step) {
-        callback(t, f(t));
-    }
-}
-
-export type F = (t: number) => number;
-
-export class Graph {
-    public minv: number | undefined = undefined;
-    public maxv: number | undefined = undefined;
-    public ctx: CanvasRenderingContext2D;
-    public mx = 0;
-    public my = 0;
-
-    constructor(ctx: CanvasRenderingContext2D) {
-        this.ctx = ctx;
-        this.ctx.canvas.onmousemove = (e) => {
-            this.mx = e.offsetX;
-            this.my = e.offsetY;
-        };
-    }
-
-    public clear(): void {
-        const ctx = this.ctx;
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);    
-
-        ctx.strokeStyle = '#aaaaaa';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, this.my + 0.5);
-        ctx.lineTo(ctx.canvas.width, this.my + 0.5);
-        ctx.stroke();
-    }
-
-    public hline(color: string, v: number): void {
-        const ctx = this.ctx;
-        const ya = (v - this.minv!) / (this.maxv! - this.minv!);
-        const y = (1-ya) * ctx.canvas.height;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(ctx.canvas.width, y);
-        ctx.stroke();
-    }
-
-    public dot(color: string, t: number, v: number, radius: number = 5): void {
-        assert(t >= 0 && t <= 1);
-        const ctx = this.ctx;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        const ya = (v - this.minv!) / (this.maxv! - this.minv!);
-        const x = t * ctx.canvas.width;
-        const y = (1-ya) * ctx.canvas.height;
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.closePath();
-        ctx.fill();
-    }
-
-    public marker(color: string, t: number): void {
-        assert(t >= 0 && t <= 1);
-        const ctx = this.ctx;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        const x = t * ctx.canvas.width;
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, ctx.canvas.height);
-        ctx.stroke();
-    }
-
-    public graphF(color: string, f: F, range: number, step = 1): void {
-        stepF(f, range, step, (t, v) => {
-            if (this.minv === undefined)
-                this.minv = v;
-            if (this.maxv === undefined)
-                this.maxv = v;
-            this.minv = Math.min(this.minv, v);
-            this.maxv = Math.max(this.maxv, v);
-        });
-
-        const ctx = this.ctx;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        stepF(f, range, step, (t, v) => {
-            const xa = (t / range);
-            const ya = (v - this.minv!) / (this.maxv! - this.minv!);
-            const x = xa * ctx.canvas.width;
-            const y = (1-ya) * ctx.canvas.height;
-            ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-    }
-}
-
-export function cv(): CanvasRenderingContext2D {
-    const canvas = document.createElement('canvas');
-    canvas.width = 800;
-    canvas.height = 400;
-    const ctx = assertExists(canvas.getContext('2d'));
-
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    canvas.style.position = 'absolute';
-    canvas.style.top = '0';
-    canvas.style.left = '0';
-
-    [].forEach.call(document.querySelectorAll('canvas.cv'), (e: HTMLElement) => document.body.removeChild(e));
-    canvas.classList.add('cv');
-    document.body.appendChild(canvas);
-
-    return ctx;
-}
+import { ReadonlyMat4, ReadonlyVec3, ReadonlyVec4, mat4, vec3, vec4 } from "gl-matrix";
+import ArrayBufferSlice from "./ArrayBufferSlice.js";
+import { divideByW } from "./Camera.js";
+import { Blue, Color, Green, Magenta, OpaqueBlack, Red, colorToCSS } from "./Color.js";
+import { downloadBuffer, downloadBufferSlice } from "./DownloadUtils.js";
+import { AABB } from "./Geometry.js";
+import { MathConstants, Vec3UnitX, Vec3UnitY, Vec3UnitZ, getMatrixAxisX, getMatrixAxisY, getMatrixAxisZ, getMatrixTranslation, lerp, transformVec3Mat4w0, vec3FromBasis2 } from "./MathHelpers.js";
+import { Slider } from "./ui.js";
+import { assertExists, hexzero, nArray } from "./util.js";
 
 let _debugOverlayCanvas: CanvasRenderingContext2D | null = null;
 export function getDebugOverlayCanvas2D(): CanvasRenderingContext2D {
@@ -256,7 +137,7 @@ export function drawWorldSpaceLocator(ctx: CanvasRenderingContext2D, clipFromWor
     drawWorldSpaceLine(ctx, clipFromWorldMatrix, scratchVec3a, scratchVec3b, color, thickness);
 }
 
-export function drawWorldSpaceAABB(ctx: CanvasRenderingContext2D, clipFromWorldMatrix: ReadonlyMat4, aabb: AABB, m: ReadonlyMat4 | null = null, color: Color = Magenta): void {
+export function drawWorldSpaceAABB(ctx: CanvasRenderingContext2D, clipFromWorldMatrix: ReadonlyMat4, aabb: AABB, m: ReadonlyMat4 | null = null, color: Color = Magenta, lineWidth: number = 2): void {
     vec4.set(p[0], aabb.min[0], aabb.min[1], aabb.min[2], 1.0);
     vec4.set(p[1], aabb.max[0], aabb.min[1], aabb.min[2], 1.0);
     vec4.set(p[2], aabb.min[0], aabb.max[1], aabb.min[2], 1.0);
@@ -266,8 +147,8 @@ export function drawWorldSpaceAABB(ctx: CanvasRenderingContext2D, clipFromWorldM
     vec4.set(p[6], aabb.min[0], aabb.max[1], aabb.max[2], 1.0);
     vec4.set(p[7], aabb.max[0], aabb.max[1], aabb.max[2], 1.0);
     if (m !== null)
-        for (let i = 0; i < 8; i++) 
-            vec4.transformMat4(p[i], p[i], m);
+        for (let i = 0; i < 8; i++)
+        vec4.transformMat4(p[i], p[i], m);
     transformToClipSpace(clipFromWorldMatrix, p, 8);
 
     ctx.beginPath();
@@ -284,7 +165,7 @@ export function drawWorldSpaceAABB(ctx: CanvasRenderingContext2D, clipFromWorldM
     drawClipSpaceLine(ctx, p[2], p[6], p[8], p[9]);
     drawClipSpaceLine(ctx, p[3], p[7], p[8], p[9]);
     ctx.closePath();
-    ctx.lineWidth = 2;
+    ctx.lineWidth = lineWidth;
     ctx.strokeStyle = colorToCSS(color);
     ctx.stroke();
 }
@@ -460,13 +341,6 @@ function interactiveSliderSelect(items: any[], testItem: (itemIndex: number, v: 
     doneButton.style.padding = '1em';
     panel.contents.append(doneButton);
 
-    const soloButton = document.createElement('div');
-    soloButton.textContent = 'Solo';
-    soloButton.style.background = '#333';
-    soloButton.style.cursor = 'pointer';
-    soloButton.style.padding = '1em';
-    panel.contents.append(soloButton);
-
     slider.setRange(-1, items.length - 1, 1);
 
     slider.onvalue = (v: number) => {
@@ -490,22 +364,13 @@ function interactiveSliderSelect(items: any[], testItem: (itemIndex: number, v: 
         done(index);
     };
 
-    soloButton.onclick = () => {
-        const index = slider.getValue();
-        for (let i = 0; i < items.length; i++) {
-            testItem(i, (i == index));
-        }
-    };
-
     panel.onclose = () => {
         done(-1);
     };
 }
 
 export function interactiveVizSliderSelect(items: any[], fieldName: string = 'visible', callback: ((obj: any, itemIndex: number) => void) | null = null): void {
-    const visibleItems = items.filter((v) => v[fieldName]).sort(
-        (a, b) => (a.sortKey - b.sortKey)
-    );
+    const visibleItems = items.filter((v) => v[fieldName]);
 
     interactiveSliderSelect(visibleItems, (i, v) => {
         const item = visibleItems[i];
