@@ -12,7 +12,8 @@ function getDataStorageBaseURL(isDevelopment: boolean): string {
     if (isDevelopment)
         return `/data`;
     else
-        return `https://z.noclip.website`;
+        // return `http://vlct.duckdns.org:3000`; // return `https://z.noclip.website`;
+        return `https://velocityra.github.io`; // return `https://z.noclip.website`;
 }
 
 function getDataURLForPath(url: string, isDevelopment: boolean): string {

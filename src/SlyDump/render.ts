@@ -111,8 +111,8 @@ void mainVS() {
     gl_Position = u_Projection * vec4(modelViewPos, 1.0);
 
     // HACK
-    // v_Depth = 1.0 - gl_Position.z / 1000.0;
-    v_Depth = (1.0 - saturate((gl_Position.z - 450.0) * u_gVecFogParams.y * 100.0)) * u_gVecFogParams.w * 2.0;
+    v_Depth = 1.0 - saturate(pow(gl_Position.z / 900.0, 2.0));
+    // v_Depth = (1.0 - saturate((gl_Position.z - 450.0) * u_gVecFogParams.y * 100.0)) * u_gVecFogParams.w * 2.0;
 
     // v_Depth = saturate((gl_Position.z - u_gVecFogParams.x) * u_gVecFogParams.y) * u_gVecFogParams.w;
     // v_Depth = saturate(((1.0 - gl_Position.z) - 5500.0) * 0.00002) * 0.4;
